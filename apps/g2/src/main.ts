@@ -551,7 +551,7 @@ function handleServerMessage(raw: string): void {
     const next = (msg as { replies?: unknown }).replies;
     if (Array.isArray(next)) replies = next as string[];
     if (savePending) {
-      setPanelStatus("Saved");
+      setPanelStatus("Saved", "ok");
       savePending = false;
     }
     render();
@@ -568,7 +568,7 @@ function handleServerMessage(raw: string): void {
     };
     if (typeof t.messageId !== "string" || typeof t.text !== "string") return;
     if (transcriptSavePending) {
-      setPanelStatus("Saved");
+      setPanelStatus("Saved", "ok");
       transcriptSavePending = false;
     }
     const answering =
@@ -613,7 +613,7 @@ function handleServerMessage(raw: string): void {
     const messageId = (msg as { messageId?: unknown }).messageId;
     if (code === "bad-replies") {
       if (savePending) {
-        setPanelStatus("Each reply must be 1-64 characters.");
+        setPanelStatus("Each reply must be 1-64 characters.", "error");
         savePending = false;
       }
       return;
@@ -622,8 +622,8 @@ function handleServerMessage(raw: string): void {
     // precedence over a pending panel save: it applies only while
     // recording or transcribing THAT message — NOT on the review screen.
     // A transcript was already accepted there, so an error for that
-    // message can only come from a duplicate/stale audio-end (review
-    // F6); a new recording moves the screen to "recording" first.
+    // message can only come from a duplicate/stale audio-end; a new
+    // recording moves the screen to "recording" first.
     if (typeof messageId === "string") {
       if (!voiceMessage || voiceMessage.id !== messageId) return;
       if (screen !== "recording" && screen !== "transcribing") return;
@@ -642,10 +642,10 @@ function handleServerMessage(raw: string): void {
     // A phone-panel voice edit that the server rejected: the panel shows
     // the reason; the glasses screen never changes for it.
     if (transcriptSavePending) {
-      if (code === "too-long") setPanelStatus("Too long — shorten it.");
-      else if (code === "empty") setPanelStatus("Empty — say something first.");
-      else if (code === "unknown-chat") setPanelStatus("Unknown chat.");
-      else setPanelStatus("Could not save.");
+      if (code === "too-long") setPanelStatus("Too long — shorten it.", "error");
+      else if (code === "empty") setPanelStatus("Empty — say something first.", "error");
+      else if (code === "unknown-chat") setPanelStatus("Unknown chat.", "error");
+      else setPanelStatus("Could not save.", "error");
       transcriptSavePending = false;
       return;
     }

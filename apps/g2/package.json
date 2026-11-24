@@ -1,1 +1,1 @@
-{"dependencies":{"@evenrealities/even_hub_sdk":"^0.0.16"},"devDependencies":{"typescript":"~7.0.2","vite":"^8.3.6"},"name":"quickreply-g2","private":true,"scripts":{"build":"tsc && vite build","dev":"vite","preview":"vite preview"},"type":"module","version":"0.0.0"}
+{"dependencies":{"@evenrealities/even_hub_sdk":"^0.0.16"},"devDependencies":{"jsdom":"^31.0.1","typescript":"~7.0.2","vite":"^8.3.6"},"name":"quickreply-g2","private":true,"scripts":{"build":"tsc && vite build","dev":"vite","preview":"vite preview"},"type":"module","version":"0.0.0"}
