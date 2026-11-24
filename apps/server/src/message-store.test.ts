@@ -3,6 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   saveMessage,
+  getReplies,
+  setReplies,
+  markRead,
+  getMessage,
+  listChats,
   listInbox,
   getOffset,
   setOffset,
@@ -63,4 +68,50 @@ test("offset persists: setOffset then getOffset round-trips", () => {
   expect(getOffset()).toBe(0);
   setOffset(1002);
   expect(getOffset()).toBe(1002);
+});
+
+test("getReplies seeds the 5 default canned replies", () => {
+  expect(getReplies()).toEqual([
+    "On my way",
+    "Noted, will check",
+    "Can't talk now",
+    "Yes",
+    "No",
+  ]);
+});
+
+test("setReplies stores 5 new replies and getReplies returns them", () => {
+  expect(
+    setReplies(["Got it", "On it", "Later", "OK", "Nope"]),
+  ).toBe(true);
+  expect(getReplies()).toEqual(["Got it", "On it", "Later", "OK", "Nope"]);
+});
+
+test("setReplies rejects the wrong count or an over-long reply", () => {
+  expect(setReplies(["only one"])).toBe(false);
+  expect(setReplies(["a", "b", "c", "d", "x".repeat(65)])).toBe(false);
+  expect(getReplies()[0]).toBe("On my way");
+});
+
+test("markRead flips a message to read", () => {
+  saveMessage(FIXTURE);
+  expect(listInbox()[0].read).toBe(0);
+  markRead("-123:7");
+  expect(listInbox()[0].read).toBe(1);
+});
+
+test("getMessage returns a stored message by id, null when unknown", () => {
+  saveMessage(FIXTURE);
+  expect(getMessage("-123:7")?.text).toBe("hello from the group");
+  expect(getMessage("-123:999")).toBeNull();
+});
+
+test("listChats returns each chat once", () => {
+  saveMessage(FIXTURE);
+  saveMessage({ ...FIXTURE, id: "-456:1", update_id: 1002, chat_id: -456, chat_title: "Alerts" });
+  saveMessage({ ...FIXTURE, id: "-123:8", update_id: 1003, text: "second" });
+  expect(listChats()).toEqual([
+    { chat_id: -456, chat_title: "Alerts" },
+    { chat_id: -123, chat_title: "Ops" },
+  ]);
 });

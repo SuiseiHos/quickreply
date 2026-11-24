@@ -51,8 +51,84 @@ function getDb(): DatabaseSync {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS replies (
+      slot INTEGER PRIMARY KEY,
+      text TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
+}
+
+const DEFAULT_REPLIES = [
+  "On my way",
+  "Noted, will check",
+  "Can't talk now",
+  "Yes",
+  "No",
+];
+
+/** The 5 canned reply slots, seeded with the defaults on first read. */
+export function getReplies(): string[] {
+  const database = getDb();
+  const count = (
+    database.prepare("SELECT COUNT(*) AS n FROM replies").get() as {
+      n: number;
+    }
+  ).n;
+  if (count === 0) {
+    const now = new Date().toISOString();
+    const insert = database.prepare(
+      "INSERT INTO replies (slot, text, updated_at) VALUES (?, ?, ?)",
+    );
+    DEFAULT_REPLIES.forEach((text, i) => insert.run(i + 1, text, now));
+  }
+  const rows = database
+    .prepare("SELECT text FROM replies ORDER BY slot ASC")
+    .all() as { text: string }[];
+  return rows.map((r) => r.text);
+}
+
+/**
+ * Replaces all 5 reply slots. Returns false (and changes nothing) unless
+ * the input is exactly 5 strings of 1–64 chars after trimming.
+ */
+export function setReplies(texts: string[]): boolean {
+  if (texts.length !== 5) return false;
+  const trimmed = texts.map((t) => t.trim());
+  if (trimmed.some((t) => t.length === 0 || t.length > 64)) return false;
+  const database = getDb();
+  const now = new Date().toISOString();
+  // Upsert, not UPDATE: the rows may not exist yet (the table is seeded
+  // lazily by getReplies, and the tests clear it between cases).
+  const upsert = database.prepare(
+    `INSERT INTO replies (slot, text, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(slot) DO UPDATE SET text = excluded.text,
+       updated_at = excluded.updated_at`,
+  );
+  trimmed.forEach((text, i) => upsert.run(i + 1, text, now));
+  return true;
+}
+
+export function getMessage(id: string): StoredMessage | null {
+  const row = getDb()
+    .prepare("SELECT * FROM messages WHERE id = ?")
+    .get(id) as Record<string, unknown> | undefined;
+  return row ? rowToMessage(row) : null;
+}
+
+export function markRead(id: string): void {
+  getDb().prepare("UPDATE messages SET read = 1 WHERE id = ?").run(id);
+}
+
+export function listChats(): { chat_id: number; chat_title: string }[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT chat_id, chat_title FROM messages
+       ORDER BY chat_title ASC`,
+    )
+    .all() as { chat_id: number; chat_title: string }[];
+  return rows;
 }
 
 function rowToMessage(row: Record<string, unknown>): StoredMessage {
@@ -118,5 +194,7 @@ export function setOffset(n: number): void {
 
 /** Test-only seam (never used by production code). */
 export function __clearAllForTests(): void {
-  getDb().exec("DELETE FROM messages; DELETE FROM meta;");
+  // The replies table is cleared too: getReplies() re-seeds the defaults
+  // on the next read, so no test sees another test's saved replies.
+  getDb().exec("DELETE FROM messages; DELETE FROM meta; DELETE FROM replies;");
 }

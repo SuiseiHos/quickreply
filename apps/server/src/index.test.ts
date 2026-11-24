@@ -5,6 +5,7 @@ import { WebSocket } from "ws";
 import { createServer, createHub } from "./index.js";
 import {
   saveMessage,
+  listInbox,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -87,6 +88,13 @@ test("WS list-inbox returns the stored messages", async () => {
         id: "-123:7",
         text: "hello from the group",
       });
+      expect(msg.replies).toEqual([
+        "On my way",
+        "Noted, will check",
+        "Can't talk now",
+        "Yes",
+        "No",
+      ]);
     } finally {
       ws.close();
     }
@@ -107,6 +115,72 @@ test("WS broadcast pushes a new message to connected clients", async () => {
       expect(
         (msg.message as Record<string, unknown>).id,
       ).toBe("-123:7");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS open-message marks the message read and returns it", async () => {
+  saveMessage(FIXTURE);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "open-message", messageId: "-123:7" }));
+      const msg = await reply;
+      expect(msg.type).toBe("message");
+      expect((msg.message as Record<string, unknown>).id).toBe("-123:7");
+      expect(listInbox()[0].read).toBe(1);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-replies saves 5 replies and broadcasts replies-updated", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-replies",
+          replies: ["Got it", "On it", "Later", "OK", "Nope"],
+        }),
+      );
+      const msg = await pushed;
+      expect(msg.type).toBe("replies-updated");
+      expect(msg.replies).toEqual(["Got it", "On it", "Later", "OK", "Nope"]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-replies rejects an over-long reply with an error", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-replies",
+          replies: ["a", "b", "c", "d", "x".repeat(65)],
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-replies");
     } finally {
       ws.close();
     }
