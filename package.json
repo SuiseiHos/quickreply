@@ -1,0 +1,1 @@
+{"dependencies":{"ws":"^8.23.0"},"devDependencies":{"@types/node":"^26.6.6","typescript":"~5.9.3","vitest":"^3.2.4"},"name":"quickreply","private":true,"scripts":{"build":"npm run build --workspaces","test":"vitest run"},"type":"module","version":"0.1.0","workspaces":["apps/*"]}
