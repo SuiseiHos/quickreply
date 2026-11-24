@@ -20,6 +20,9 @@ screenshot Sui read herself. Nothing here is a builder's assertion.
 | 3 | Can't talk now | C2 canned, sim | 6 | 24 Nov 20:14 |
 | 4 | On my way, I'll be there in five minutes. | C1 voice, sim + WAV injection | 7 | 24 Nov 20:30 |
 | 5 | On my way, I'll be there in five minutes. | C1 voice, sim + WAV injection (T6 build) | 8 | 24 Nov 20:36 |
+| 6 | On my way | C2 canned, sim (video take 1) | 9 | 24 Nov 20:39 |
+| 7 | On my way | C2 canned, sim (video take 2) | 10 | 24 Nov 20:42 |
+| 8 | On my way, I'll be there in five minutes. | C1 voice, sim + WAV injection (video frames) | 11 | 24 Nov 20:45 |
 
 Idempotency: the same key sent twice returned the identical stored
 receipt with exactly one Telegram call and one `send_keys` row.
