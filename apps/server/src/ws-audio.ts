@@ -15,6 +15,16 @@ import { getMessage } from "./message-store.js";
  * fake instead of loading the Whisper model. */
 export type TranscribeFn = (pcm: Buffer) => Promise<string>;
 
+/** Peak absolute sample of 16 kHz mono s16le PCM (0 for empty input). */
+export function maxAbsSample(pcm: Buffer): number {
+  let peak = 0;
+  for (let i = 0; i + 1 < pcm.length; i += 2) {
+    const v = Math.abs(pcm.readInt16LE(i));
+    if (v > peak) peak = v;
+  }
+  return peak;
+}
+
 export function createAudioHandler(opts: {
   broadcast: (msg: unknown) => void;
   transcribe?: TranscribeFn;
@@ -46,6 +56,15 @@ export function createAudioHandler(opts: {
     console.log(
       `[QuickReply] audio-end for ${messageId}: ${pcm.length} bytes`,
     );
+    // Silence gate (Task 6): Whisper hallucinates on near-silence (it
+    // transcribed 1 s of digital silence as "You" — FRICTION.md, T5).
+    // Below this peak the audio carries no speech, so answer `empty`
+    // without loading the model. The fixture reply peaks at 32080; even
+    // quiet speech peaks in the hundreds, so 50 is far from any real voice.
+    if (maxAbsSample(pcm) < 50) {
+      opts.broadcast({ type: "error", code: "empty", messageId });
+      return;
+    }
     let text: string;
     try {
       text = await transcribe(pcm);
