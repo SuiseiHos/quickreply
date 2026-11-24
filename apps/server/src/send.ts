@@ -1,9 +1,12 @@
-// Canned send path (Task 4): the deterministic pre-send gate (DEEP-DIVE
-// §5) + idempotency (G4). The gate runs server-side; the client mirrors it.
-// A send is recorded under its idempotency key BEFORE the receipt is
-// returned, so a re-send with the same key returns the stored receipt and
-// never calls Telegram twice. A failed Telegram call stores nothing, so a
-// retry with the same key tries again.
+// Shared send path (Tasks 4–5): the deterministic pre-send gate
+// (DEEP-DIVE §5) + idempotency (G4). The gate runs server-side; the
+// client mirrors it. A send is recorded under its idempotency key BEFORE
+// the receipt is returned, so a re-send with the same key returns the
+// stored receipt and never calls Telegram twice. A failed Telegram call
+// stores nothing, so a retry with the same key tries again.
+//
+// sendCanned resolves a reply slot to its text; sendText sends free text
+// (the voice path). Both share this gate — never duplicate it.
 import {
   getMessage,
   getReplies,
@@ -23,11 +26,11 @@ export type SendResult =
   | { ok: true; receipt: Receipt }
   | { ok: false; code: string };
 
-export async function sendCanned(
-  input: { messageId: string; slot: number; idempotencyKey: string },
+export async function sendText(
+  input: { messageId: string; text: string; idempotencyKey: string },
   sendTelegram: SendTelegramFn = sendMessage,
 ): Promise<SendResult> {
-  const { messageId, slot, idempotencyKey } = input;
+  const { messageId, text, idempotencyKey } = input;
 
   // G4 (first): a duplicate key returns the stored receipt, no Telegram call.
   const stored = getSend(idempotencyKey);
@@ -38,14 +41,6 @@ export async function sendCanned(
   // G3: the message must be one the bot has seen (a known chat).
   const message = getMessage(messageId);
   if (!message) return { ok: false, code: "unknown-chat" };
-
-  // The slot resolves to the reply text; an out-of-range slot is a client
-  // bug and fails like any other send failure (the glasses show retry).
-  const replies = getReplies();
-  if (slot < 0 || slot >= replies.length) {
-    return { ok: false, code: "send-failed" };
-  }
-  const text = replies[slot];
 
   // G1: non-empty after trim. G2: length ≤4096 (canned replies are ≤64 by
   // construction, but the gate is enforced here, not assumed).
@@ -79,4 +74,22 @@ export async function sendCanned(
     `[QuickReply] sent "${text}" to ${message.chat_title} (telegram message_id ${sent.message_id})`,
   );
   return { ok: true, receipt };
+}
+
+export async function sendCanned(
+  input: { messageId: string; slot: number; idempotencyKey: string },
+  sendTelegram: SendTelegramFn = sendMessage,
+): Promise<SendResult> {
+  const { messageId, slot, idempotencyKey } = input;
+
+  // The slot resolves to the reply text; an out-of-range slot is a client
+  // bug and fails like any other send failure (the glasses show retry).
+  const replies = getReplies();
+  if (slot < 0 || slot >= replies.length) {
+    return { ok: false, code: "send-failed" };
+  }
+  return sendText(
+    { messageId, text: replies[slot], idempotencyKey },
+    sendTelegram,
+  );
 }

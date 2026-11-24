@@ -1,6 +1,9 @@
-.env
+
 *.db
 *.ehpk
+.env
+.superpowers/
+.venv
+.venv/
 dist/
 node_modules/
-.superpowers/

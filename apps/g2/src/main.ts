@@ -13,13 +13,17 @@ import {
 } from "@evenrealities/even_hub_sdk";
 import { connectWs } from "./ws";
 import {
+  editHintScreen,
   errorScreen,
   homeScreen,
   inboxScreen,
   messageScreen,
   receiptScreen,
+  recordingScreen,
   replyMenuScreen,
+  reviewScreen,
   sendingScreen,
+  transcribingScreen,
   type InboxMessage,
 } from "./screens";
 import { renderReplyPanel, setPanelStatus } from "./phone-panel";
@@ -50,7 +54,11 @@ type Screen =
   | "menu"
   | "sending"
   | "receipt"
-  | "error";
+  | "error"
+  | "recording"
+  | "review"
+  | "transcribing"
+  | "edit-hint";
 
 let bridge: EvenAppBridge | null = null;
 let serverWs: WebSocket | null = null;
@@ -70,14 +78,21 @@ let inboxPageStart = 0;
 let currentMessage: InboxMessage | null = null;
 let menuSelected = 0;
 let receiptTimer: ReturnType<typeof setTimeout> | null = null;
-let lastSend: {
-  messageId: string;
-  slot: number;
-  idempotencyKey: string;
-} | null = null;
+let lastSend:
+  | { kind: "canned"; messageId: string; slot: number; idempotencyKey: string }
+  | { kind: "voice"; messageId: string; text: string; idempotencyKey: string }
+  | null = null;
 let errorText = "Send failed. Tap to retry.";
+/** What the error screen's tap retries: re-send, or re-record (voice). */
+let errorRetry: "send" | "record" | null = null;
 let receipt: { chatTitle: string; text: string; sentAt: string } | null = null;
 let savePending = false;
+/** The message a voice reply answers (recording → review → send). */
+let voiceMessage: InboxMessage | null = null;
+/** The transcript under review (also shown in the phone panel). */
+let reviewTranscript = "";
+/** A phone-panel voice edit is waiting for its server reply. */
+let transcriptSavePending = false;
 /** Last tap timestamp (ms); dedupes one physical tap delivered twice. */
 let lastTapAt = 0;
 
@@ -108,6 +123,18 @@ function currentScreenText(): string {
         : homeScreen(unreadCount);
     case "sending":
       return sendingScreen();
+    case "recording":
+      return voiceMessage
+        ? recordingScreen(voiceMessage.chat_title)
+        : homeScreen(unreadCount);
+    case "transcribing":
+      return transcribingScreen();
+    case "review":
+      return voiceMessage
+        ? reviewScreen(voiceMessage.chat_title, reviewTranscript)
+        : homeScreen(unreadCount);
+    case "edit-hint":
+      return editHintScreen();
     case "receipt":
       return receipt
         ? receiptScreen(receipt.chatTitle, receipt.text, new Date(receipt.sentAt))
@@ -126,7 +153,18 @@ function render(): void {
       setPanelStatus("Saving...");
       sendToServer({ type: "update-replies", replies: next });
     },
-  });
+    onSaveVoice: (messageId, text) => {
+      transcriptSavePending = true;
+      setPanelStatus("Saving...");
+      sendToServer({ type: "update-transcript", messageId, text });
+    },
+  },
+  // The phone panel shows the voice-reply editor only while a review
+  // is active (or its too-long error is showing).
+  (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
+    ? { messageId: voiceMessage.id, text: reviewTranscript }
+    : null,
+  );
 }
 
 function sendToServer(msg: unknown): void {
@@ -182,7 +220,7 @@ function openMenu(): void {
 function sendCanned(): void {
   if (!currentMessage) return;
   const key = newIdempotencyKey();
-  lastSend = { messageId: currentMessage.id, slot: menuSelected, idempotencyKey: key };
+  lastSend = { kind: "canned", messageId: currentMessage.id, slot: menuSelected, idempotencyKey: key };
   screen = "sending";
   sendToServer({
     type: "send-canned",
@@ -193,15 +231,80 @@ function sendCanned(): void {
   render();
 }
 
+/** Start a voice reply (Task 5): the message screen's swipe-up. On real
+ * hardware the mic stream starts here (bridge.audioControl); in the
+ * simulator the audio comes from the injection harness. */
+function startRecording(): void {
+  if (!currentMessage) return;
+  voiceMessage = currentMessage;
+  reviewTranscript = "";
+  screen = "recording";
+  render();
+}
+
+/** Tap-to-stop: end the mic stream and ask the server to transcribe what
+ * it has. The transcript (or the empty/stt-failed error) arrives on the
+ * same socket and the guard in handleServerMessage applies it. */
+function stopRecording(): void {
+  if (!voiceMessage) return;
+  screen = "transcribing";
+  sendToServer({ type: "audio-end", messageId: voiceMessage.id });
+  render();
+}
+
+/** Cancel the recording (long-press / swipe down): back to the message
+ * and tell the server to drop the buffered PCM for this socket, so a
+ * later recording does not transcribe stale audio. */
+function cancelRecording(): void {
+  sendToServer({ type: "audio-discard" });
+  voiceMessage = null;
+  reviewTranscript = "";
+  screen = "message";
+  render();
+}
+
+/** Tap on the review screen: send the transcript through the same gate
+ * + receipt as a canned reply (Task 4). */
+function sendVoice(): void {
+  if (!voiceMessage) return;
+  const key = newIdempotencyKey();
+  lastSend = { kind: "voice", messageId: voiceMessage.id, text: reviewTranscript, idempotencyKey: key };
+  screen = "sending";
+  sendToServer({
+    type: "send-voice",
+    messageId: voiceMessage.id,
+    text: reviewTranscript,
+    idempotencyKey: key,
+  });
+  render();
+}
+
+/** Discard the review (swipe down / long-press): back to the message. */
+function discardReview(): void {
+  voiceMessage = null;
+  reviewTranscript = "";
+  screen = "message";
+  render();
+}
+
 function retrySend(): void {
   if (!lastSend) return;
   screen = "sending";
-  sendToServer({
-    type: "send-canned",
-    messageId: lastSend.messageId,
-    slot: lastSend.slot,
-    idempotencyKey: lastSend.idempotencyKey,
-  });
+  if (lastSend.kind === "canned") {
+    sendToServer({
+      type: "send-canned",
+      messageId: lastSend.messageId,
+      slot: lastSend.slot,
+      idempotencyKey: lastSend.idempotencyKey,
+    });
+  } else {
+    sendToServer({
+      type: "send-voice",
+      messageId: lastSend.messageId,
+      text: lastSend.text,
+      idempotencyKey: lastSend.idempotencyKey,
+    });
+  }
   render();
 }
 
@@ -243,10 +346,26 @@ function handleTap(): void {
     case "menu":
       sendCanned();
       break;
+    case "recording":
+      stopRecording();
+      break;
+    case "review":
+      sendVoice();
+      break;
+    case "edit-hint":
+      screen = "review";
+      render();
+      break;
     case "error":
-      retrySend();
+      // A send error retries the send; a voice error re-records.
+      if (errorRetry === "record") {
+        startRecording();
+      } else {
+        retrySend();
+      }
       break;
     case "sending":
+    case "transcribing":
     case "receipt":
       break;
   }
@@ -261,7 +380,12 @@ function handleSwipeUp(): void {
       cycleMenuSelection(-1);
       break;
     case "message":
-      // Task 5: voice recording. Nothing yet.
+      startRecording();
+      break;
+    case "review":
+      // Edit: the transcript is edited on the phone panel.
+      screen = "edit-hint";
+      render();
       break;
     default:
       break;
@@ -278,6 +402,12 @@ function handleSwipeDown(): void {
       break;
     case "message":
       goInbox();
+      break;
+    case "recording":
+      cancelRecording();
+      break;
+    case "review":
+      discardReview();
       break;
     default:
       break;
@@ -298,6 +428,21 @@ function handleLongPress(): void {
         render();
       }
       break;
+    case "recording":
+      cancelRecording();
+      break;
+    case "transcribing":
+      // The transcript may still arrive later; the guard ignores it once
+      // the screen has moved on.
+      cancelRecording();
+      break;
+    case "review":
+      discardReview();
+      break;
+    case "edit-hint":
+      screen = "review";
+      render();
+      break;
     case "sending":
       if (currentMessage) {
         screen = "menu";
@@ -305,7 +450,14 @@ function handleLongPress(): void {
       }
       break;
     case "error":
-      if (currentMessage) {
+      // Back to where the send started: the menu for canned, the message
+      // for voice.
+      if (errorRetry === "record") {
+        if (currentMessage) {
+          screen = "message";
+          render();
+        }
+      } else if (currentMessage) {
         screen = "menu";
         render();
       }
@@ -372,6 +524,47 @@ function handleServerMessage(raw: string): void {
       savePending = false;
     }
     render();
+  } else if (type === "transcript") {
+    // THE clobber guard (the CallIt bug, 24 Nov 2026): a transcript
+    // applies ONLY when this screen is recording, reviewing or
+    // transcribing for THAT SAME message — never on the receipt, the
+    // menu, another message's review, or after a discard. An edited
+    // transcript after a too-long voice send also re-opens the review.
+    const t = msg as {
+      messageId?: unknown;
+      chatTitle?: unknown;
+      text?: unknown;
+    };
+    if (typeof t.messageId !== "string" || typeof t.text !== "string") return;
+    if (transcriptSavePending) {
+      setPanelStatus("Saved");
+      transcriptSavePending = false;
+    }
+    const answering =
+      voiceMessage !== null && voiceMessage.id === t.messageId;
+    const onVoiceScreen =
+      screen === "recording" || screen === "review" || screen === "transcribing";
+    const afterTooLong =
+      screen === "error" &&
+      errorRetry === "record" &&
+      lastSend?.kind === "voice" &&
+      lastSend.messageId === t.messageId;
+    if ((!answering || !onVoiceScreen) && !afterTooLong) return;
+    const found = messages.find((m) => m.id === t.messageId);
+    voiceMessage =
+      found ??
+      ({
+        id: t.messageId,
+        chat_id: 0,
+        chat_title: typeof t.chatTitle === "string" ? t.chatTitle : "",
+        sender_name: "",
+        text: "",
+        created_at: "",
+        read: 1,
+      } satisfies InboxMessage);
+    reviewTranscript = t.text;
+    screen = "review";
+    render();
   } else if (type === "receipt") {
     // A receipt only answers a send in flight: never let a late receipt
     // clobber another screen (the CallIt transcript-clobber class).
@@ -386,23 +579,60 @@ function handleServerMessage(raw: string): void {
     receiptTimer = setTimeout(goHome, RECEIPT_HOLD_MS);
   } else if (type === "error") {
     const code = (msg as { code?: unknown }).code;
-    if (code === "send-failed") {
-      errorText = "Send failed. Tap to retry.";
-    } else if (code === "too-long") {
-      errorText = "Too long. Edit it on the phone.";
-    } else if (code === "empty") {
-      errorText = "Nothing heard. Tap to try again.";
-    } else if (code === "unknown-chat") {
-      errorText = "Unknown chat. Tap to retry.";
-    } else if (code === "bad-replies") {
+    const messageId = (msg as { messageId?: unknown }).messageId;
+    if (code === "bad-replies") {
       if (savePending) {
         setPanelStatus("Each reply must be 1-64 characters.");
         savePending = false;
       }
       return;
+    }
+    // A voice error (broadcast with the message it answers) takes
+    // precedence over a pending panel save: it applies only while
+    // recording, reviewing or transcribing THAT message.
+    if (typeof messageId === "string") {
+      if (!voiceMessage || voiceMessage.id !== messageId) return;
+      if (screen !== "recording" && screen !== "review" && screen !== "transcribing") return;
+      if (code === "empty") {
+        errorText = "Nothing heard — try again";
+      } else if (code === "stt-failed") {
+        errorText = "Couldn't hear that. Tap to try again.";
+      } else {
+        return;
+      }
+      errorRetry = "record";
+      screen = "error";
+      render();
+      return;
+    }
+    // A phone-panel voice edit that the server rejected: the panel shows
+    // the reason; the glasses screen never changes for it.
+    if (transcriptSavePending) {
+      if (code === "too-long") setPanelStatus("Too long — shorten it.");
+      else if (code === "empty") setPanelStatus("Empty — say something first.");
+      else if (code === "unknown-chat") setPanelStatus("Unknown chat.");
+      else setPanelStatus("Could not save.");
+      transcriptSavePending = false;
+      return;
+    }
+    // A send error (a reply to this socket only): it applies only while a
+    // send is in flight or already on the error screen.
+    if (screen !== "sending" && screen !== "error") return;
+    if (code === "send-failed") {
+      errorText = "Send failed. Tap to retry.";
+    } else if (code === "too-long") {
+      errorText = "Too long. Edit it on the phone.";
+    } else if (code === "empty") {
+      errorText = "Nothing heard — try again";
+    } else if (code === "unknown-chat") {
+      errorText = "Unknown chat. Tap to retry.";
     } else {
       return;
     }
+    // A too-long voice send is fixed by re-recording (or the phone edit);
+    // a canned send failure retries the send.
+    errorRetry =
+      code === "too-long" && lastSend?.kind === "voice" ? "record" : "send";
     screen = "error";
     render();
   }

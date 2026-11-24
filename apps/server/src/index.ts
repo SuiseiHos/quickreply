@@ -13,7 +13,8 @@ import {
   markRead,
   setReplies,
 } from "./message-store.js";
-import { sendCanned } from "./send.js";
+import { sendCanned, sendText, type SendResult } from "./send.js";
+import { createAudioHandler, type TranscribeFn } from "./ws-audio.js";
 import {
   sendMessage,
   startPoller,
@@ -55,6 +56,43 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
       ws.send(JSON.stringify({ type: "error", code: "send-failed" }));
       return;
     }
+    replySendResult(ws, result);
+  }
+
+  /** The voice send: free text through the same gate + receipt as canned. */
+  async function handleSendVoice(
+    ws: WebSocket,
+    payload: {
+      messageId?: unknown;
+      text?: unknown;
+      idempotencyKey?: unknown;
+    },
+  ): Promise<void> {
+    if (
+      typeof payload.messageId !== "string" ||
+      typeof payload.text !== "string" ||
+      typeof payload.idempotencyKey !== "string"
+    ) {
+      return;
+    }
+    let result;
+    try {
+      result = await sendText(
+        {
+          messageId: payload.messageId,
+          text: payload.text,
+          idempotencyKey: payload.idempotencyKey,
+        },
+        sendTelegram,
+      );
+    } catch {
+      ws.send(JSON.stringify({ type: "error", code: "send-failed" }));
+      return;
+    }
+    replySendResult(ws, result);
+  }
+
+  function replySendResult(ws: WebSocket, result: SendResult): void {
     if (result.ok) {
       ws.send(JSON.stringify({ type: "receipt", ...result.receipt }));
     } else {
@@ -113,6 +151,41 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
           idempotencyKey?: unknown;
         },
       );
+    } else if (type === "send-voice") {
+      void handleSendVoice(
+        ws,
+        msg as {
+          messageId?: unknown;
+          text?: unknown;
+          idempotencyKey?: unknown;
+        },
+      );
+    } else if (type === "update-transcript") {
+      // Phone-panel edit of the voice reply under review: validate, then
+      // broadcast the edited transcript so the glasses review updates.
+      // The gate (G1/G2) runs here, not on the phone.
+      const messageId = (msg as { messageId?: unknown }).messageId;
+      const text = (msg as { text?: unknown }).text;
+      if (typeof messageId !== "string" || typeof text !== "string") return;
+      const message = getMessage(messageId);
+      if (!message) {
+        ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
+        return;
+      }
+      if (text.trim().length === 0) {
+        ws.send(JSON.stringify({ type: "error", code: "empty" }));
+        return;
+      }
+      if (text.length > 4096) {
+        ws.send(JSON.stringify({ type: "error", code: "too-long" }));
+        return;
+      }
+      broadcast({
+        type: "transcript",
+        messageId,
+        chatTitle: message.chat_title,
+        text,
+      });
     }
     // Unknown types are ignored.
   }
@@ -129,18 +202,44 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
 
 export type Hub = ReturnType<typeof createHub>;
 
-export function createServer(hub = createHub()) {
+/** `transcribe` is injectable so tests can use a fake instead of loading
+ * the Whisper model. */
+export function createServer(
+  hub = createHub(),
+  audioOpts?: { transcribe?: TranscribeFn },
+) {
   const app = express();
   app.use(express.json());
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
   });
 
+  const audio = createAudioHandler({
+    broadcast: (msg) => hub.broadcast(msg),
+    transcribe: audioOpts?.transcribe,
+  });
+
   const server = createHttpServer(app);
   const wss = new WebSocketServer({ server });
   wss.on("connection", (ws) => {
     hub.addClient(ws);
-    ws.on("message", (data) => hub.handleMessage(ws, String(data)));
+    ws.on("close", () => audio.onClose(ws));
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) {
+        audio.onBinary(ws, Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
+        return;
+      }
+      const raw = String(data);
+      let msg: unknown;
+      try {
+        msg = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      // Audio-path text messages are handled by the audio handler first.
+      if (audio.onText(ws, msg)) return;
+      hub.handleMessage(ws, raw);
+    });
   });
   return server;
 }

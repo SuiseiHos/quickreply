@@ -6,6 +6,14 @@
 export type ReplyPanelCallbacks = {
   /** User tapped Save: send the edited reply slots to the server. */
   onSave: (replies: string[]) => void;
+  /** User saved the voice reply under review (Task 5). */
+  onSaveVoice?: (messageId: string, text: string) => void;
+};
+
+/** A voice reply under review on the glasses (Task 5). */
+export type VoiceReply = {
+  messageId: string;
+  text: string;
 };
 
 /** Status line under the panel buttons (e.g. "Saving..." / "Saved"). */
@@ -61,17 +69,20 @@ function button(
 /**
  * Render the reply editor into #app: 5 text inputs (one per slot, max 64
  * chars), a Save button, a status line, and a read-only list of chats the
- * bot has seen. Re-rendering with unchanged inputs is a no-op, so typing
- * is never wiped by an inbox update.
+ * bot has seen. When a voice reply is under review on the glasses, a
+ * second section edits that transcript (max 4096 chars) — the Edit path
+ * for the review screen and the too-long offer. Re-rendering with
+ * unchanged inputs is a no-op, so typing is never wiped by an inbox update.
  */
 export function renderReplyPanel(
   replies: string[],
   chats: string[],
   cb: ReplyPanelCallbacks,
+  voice?: VoiceReply | null,
 ): void {
   const appEl = document.querySelector<HTMLDivElement>("#app");
   if (!appEl) return;
-  const signature = JSON.stringify({ replies, chats });
+  const signature = JSON.stringify({ replies, chats, voice });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -107,4 +118,36 @@ export function renderReplyPanel(
     statusEl,
     chatList,
   );
+
+  if (voice && cb.onSaveVoice) {
+    const voiceTitle = document.createElement("h2");
+    voiceTitle.textContent = "Voice reply";
+    voiceTitle.style.margin = "20px 0 12px";
+    appEl.append(voiceTitle);
+
+    const area = document.createElement("textarea");
+    area.value = voice.text;
+    area.maxLength = 4096;
+    area.rows = 4;
+    area.style.display = "block";
+    area.style.width = "100%";
+    area.style.boxSizing = "border-box";
+    area.style.fontSize = "16px";
+    area.style.padding = "8px";
+    appEl.append(area);
+
+    appEl.append(
+      button("Save voice reply", () => {
+        if (area.value.trim().length === 0) {
+          setPanelStatus("Empty — say something first.");
+          return;
+        }
+        if (area.value.length > 4096) {
+          setPanelStatus("Too long — shorten it.");
+          return;
+        }
+        cb.onSaveVoice!(voice.messageId, area.value);
+      }, true),
+    );
+  }
 }

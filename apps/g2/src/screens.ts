@@ -147,6 +147,46 @@ export function errorScreen(message: string): string {
   return [message, "", "Tap = Retry", "Long-press = Back"].join("\n");
 }
 
+/** Recording screen (Screen 5): the chat being answered + REC.
+ * No "●" glyph: the glasses font does not render "▸" or "✓" (verified
+ * 24 Nov 2026), and "●" is the same class of glyph. Plain "REC" reads. */
+export function recordingScreen(chatTitle: string): string {
+  return ["REC", "", `To ${chatTitle}:`, "Speak now", "", "Tap = Stop"].join(
+    "\n",
+  );
+}
+
+/** Transcript review (Screen 6): the chat, the transcript, and the three
+ * actions — send, edit on the phone, discard. */
+export function reviewScreen(chatTitle: string, transcript: string): string {
+  const body = wrapText(transcript, LIST_LINE_MAX, 3);
+  return [
+    `To ${chatTitle}:`,
+    "",
+    ...body,
+    "",
+    "Tap = Send   Swipe up = Edit",
+    "Swipe down = Discard",
+  ].join("\n");
+}
+
+/** Transient screen after tap-to-stop, while Whisper transcribes. */
+export function transcribingScreen(): string {
+  return "Transcribing...";
+}
+
+/** Edit hint (from review swipe-up): the edit happens on the phone panel. */
+export function editHintScreen(): string {
+  return [
+    "Edit on phone",
+    "",
+    "Change the reply on",
+    "the phone, then Save",
+    "",
+    "Tap = Back",
+  ].join("\n");
+}
+
 /** Transient screen while a canned send waits for the receipt. */
 export function sendingScreen(): string {
   return "Sending...";

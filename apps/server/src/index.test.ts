@@ -292,3 +292,188 @@ test("WS send-canned for an unknown message returns an error", async () => {
     await shutdown(server);
   }
 });
+
+// --- Task 5: voice send + transcript edit over WS. ---
+
+function makeSendHub() {
+  const calls: { chatId: number; text: string }[] = [];
+  const hub = createHub({
+    sendTelegram: async (chatId, text) => {
+      calls.push({ chatId, text });
+      return { message_id: 99, chat: { id: chatId }, date: 1795524000, text };
+    },
+  });
+  return { hub, calls };
+}
+
+test("WS send-voice returns a receipt and calls Telegram once", async () => {
+  saveMessage(FIXTURE);
+  const { hub, calls } = makeSendHub();
+  const { server, port } = await boot(hub);
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-voice",
+          messageId: "-123:7",
+          text: "Running late, sorry!",
+          idempotencyKey: "ws-v-1",
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("receipt");
+      expect(msg.messageId).toBe("-123:7");
+      expect(msg.text).toBe("Running late, sorry!");
+      expect(calls).toEqual([{ chatId: -123, text: "Running late, sorry!" }]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS send-voice re-send with the same key returns the stored receipt", async () => {
+  saveMessage(FIXTURE);
+  const { hub, calls } = makeSendHub();
+  const { server, port } = await boot(hub);
+  try {
+    const ws = await connect(port);
+    try {
+      const first = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-voice",
+          messageId: "-123:7",
+          text: "See you soon.",
+          idempotencyKey: "ws-v-2",
+        }),
+      );
+      const receipt1 = await first;
+      const second = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-voice",
+          messageId: "-123:7",
+          text: "See you soon.",
+          idempotencyKey: "ws-v-2",
+        }),
+      );
+      const receipt2 = await second;
+      expect(receipt2).toEqual(receipt1);
+      expect(calls).toHaveLength(1);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS send-voice with empty text returns an empty error", async () => {
+  saveMessage(FIXTURE);
+  const { hub, calls } = makeSendHub();
+  const { server, port } = await boot(hub);
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-voice",
+          messageId: "-123:7",
+          text: "  ",
+          idempotencyKey: "ws-v-3",
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("empty");
+      expect(calls).toHaveLength(0);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-transcript broadcasts the edited transcript", async () => {
+  saveMessage(FIXTURE);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-transcript",
+          messageId: "-123:7",
+          text: "Edited on the phone.",
+        }),
+      );
+      const msg = await pushed;
+      expect(msg).toEqual({
+        type: "transcript",
+        messageId: "-123:7",
+        chatTitle: "Ops",
+        text: "Edited on the phone.",
+      });
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-transcript rejects over-long text with a too-long error", async () => {
+  saveMessage(FIXTURE);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-transcript",
+          messageId: "-123:7",
+          text: "x".repeat(4097),
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("too-long");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-transcript for an unknown message returns unknown-chat", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-transcript",
+          messageId: "-123:999",
+          text: "hello",
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("unknown-chat");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});

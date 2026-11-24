@@ -7,6 +7,10 @@ import {
   receiptScreen,
   sendingScreen,
   errorScreen,
+  recordingScreen,
+  reviewScreen,
+  transcribingScreen,
+  editHintScreen,
   wrapText,
 } from "./screens.js";
 
@@ -160,5 +164,50 @@ test("wrapText breaks on word boundaries and caps the line count", () => {
 test("errorScreen shows the failure and the retry gesture", () => {
   expect(errorScreen("Send failed. Tap to retry.")).toBe(
     ["Send failed. Tap to retry.", "", "Tap = Retry", "Long-press = Back"].join("\n"),
+  );
+});
+
+// --- Task 5: voice screens (recording / review / transcribing / edit). ---
+
+test("recordingScreen shows REC and the chat being answered", () => {
+  expect(recordingScreen("Ops")).toBe(
+    ["REC", "", "To Ops:", "Speak now", "", "Tap = Stop"].join("\n"),
+  );
+});
+
+test("reviewScreen shows the chat, the transcript and the three actions", () => {
+  expect(reviewScreen("Ops", "On my way, see you soon.")).toBe(
+    [
+      "To Ops:",
+      "",
+      "On my way, see you soon.",
+      "",
+      "Tap = Send   Swipe up = Edit",
+      "Swipe down = Discard",
+    ].join("\n"),
+  );
+});
+
+test("reviewScreen wraps a long transcript to 3 lines", () => {
+  const screen = reviewScreen("Ops", "word ".repeat(40).trim());
+  const lines = screen.split("\n");
+  expect(lines.length).toBeLessThanOrEqual(8);
+  expect(lines.every((l) => l.length <= 64)).toBe(true);
+});
+
+test("transcribingScreen shows a waiting line", () => {
+  expect(transcribingScreen()).toBe("Transcribing...");
+});
+
+test("editHintScreen points at the phone panel", () => {
+  expect(editHintScreen()).toBe(
+    [
+      "Edit on phone",
+      "",
+      "Change the reply on",
+      "the phone, then Save",
+      "",
+      "Tap = Back",
+    ].join("\n"),
   );
 });

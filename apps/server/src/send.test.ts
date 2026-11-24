@@ -1,7 +1,7 @@
 import { beforeEach, test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sendCanned } from "./send.js";
+import { sendCanned, sendText } from "./send.js";
 import {
   saveMessage,
   getSend,
@@ -113,4 +113,69 @@ test("a failed Telegram send returns send-failed and stores no key", async () =>
   );
   expect(second.ok).toBe(true);
   expect(calls).toHaveLength(1);
+});
+
+// --- sendText (Task 5): the voice path resolves the text itself and
+// shares the same gate + idempotency as the canned path. ---
+
+test("sendText sends free text and returns a receipt", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendText(
+    { messageId: "-123:7", text: "Running late, sorry!", idempotencyKey: "vt-1" },
+    fn,
+  );
+  expect(calls).toEqual([{ chatId: -123, text: "Running late, sorry!" }]);
+  expect(result).toEqual({
+    ok: true,
+    receipt: {
+      messageId: "-123:7",
+      chatTitle: "Ops",
+      text: "Running late, sorry!",
+      sentAt: new Date(1795524000 * 1000).toISOString(),
+    },
+  });
+});
+
+test("sendText rejects empty text without calling Telegram", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendText(
+    { messageId: "-123:7", text: "   ", idempotencyKey: "vt-2" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "empty" });
+  expect(calls).toHaveLength(0);
+});
+
+test("sendText rejects over-long text without calling Telegram", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendText(
+    { messageId: "-123:7", text: "x".repeat(4097), idempotencyKey: "vt-3" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "too-long" });
+  expect(calls).toHaveLength(0);
+});
+
+test("sendText for an unknown message returns unknown-chat", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendText(
+    { messageId: "-123:999", text: "hello", idempotencyKey: "vt-4" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "unknown-chat" });
+  expect(calls).toHaveLength(0);
+});
+
+test("sendText re-send with the same key returns the stored receipt", async () => {
+  const { fn, calls } = makeFake();
+  const first = await sendText(
+    { messageId: "-123:7", text: "See you soon.", idempotencyKey: "vt-5" },
+    fn,
+  );
+  const second = await sendText(
+    { messageId: "-123:7", text: "See you soon.", idempotencyKey: "vt-5" },
+    fn,
+  );
+  expect(calls).toHaveLength(1);
+  expect(second).toEqual(first);
 });
