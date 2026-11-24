@@ -56,6 +56,14 @@ function getDb(): DatabaseSync {
       text TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS send_keys (
+      key TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      chat_id INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -131,6 +139,48 @@ export function listChats(): { chat_id: number; chat_title: string }[] {
   return rows;
 }
 
+export type StoredSend = {
+  key: string;
+  message_id: number;
+  chat_id: number;
+  text: string;
+  result_json: string;
+  created_at: string;
+};
+
+/** The stored receipt for an idempotency key, or null (never sent). */
+export function getSend(key: string): StoredSend | null {
+  const row = getDb()
+    .prepare("SELECT * FROM send_keys WHERE key = ?")
+    .get(key) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    key: String(row.key),
+    message_id: Number(row.message_id),
+    chat_id: Number(row.chat_id),
+    text: String(row.text),
+    result_json: String(row.result_json),
+    created_at: String(row.created_at),
+  };
+}
+
+/** Records a completed send under its idempotency key. */
+export function recordSend(
+  key: string,
+  messageId: number,
+  chatId: number,
+  text: string,
+  resultJson: string,
+): void {
+  getDb()
+    .prepare(
+      `INSERT INTO send_keys
+         (key, message_id, chat_id, text, result_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(key, messageId, chatId, text, resultJson, new Date().toISOString());
+}
+
 function rowToMessage(row: Record<string, unknown>): StoredMessage {
   return {
     id: String(row.id),
@@ -196,5 +246,7 @@ export function setOffset(n: number): void {
 export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
-  getDb().exec("DELETE FROM messages; DELETE FROM meta; DELETE FROM replies;");
+  getDb().exec(
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys;",
+  );
 }

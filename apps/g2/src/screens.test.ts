@@ -141,7 +141,7 @@ test("replyMenuScreen marks the selected reply with '> '", () => {
 test("receiptScreen shows the sent time and the reply actually sent", () => {
   const sentAt = new Date(2026, 10, 24, 19, 55);
   expect(receiptScreen("Ops", "On my way", sentAt)).toBe(
-    ["Sent ✓ 19:55", "", "Ops: On my way"].join("\n"),
+    ["Sent 19:55", "", "Ops: On my way"].join("\n"),
   );
 });
 

@@ -13,14 +13,54 @@ import {
   markRead,
   setReplies,
 } from "./message-store.js";
-import { startPoller } from "./telegram.js";
+import { sendCanned } from "./send.js";
+import {
+  sendMessage,
+  startPoller,
+  type SendTelegramFn,
+} from "./telegram.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 
 /** Connected glasses + message routing. Kept separate from the HTTP
- * server so tests can drive it over a real WebSocket without a poller. */
-export function createHub() {
+ * server so tests can drive it over a real WebSocket without a poller.
+ * `sendTelegram` is injectable so tests can use a fake instead of
+ * delivering a real message to a real chat. */
+export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
   const clients = new Set<WebSocket>();
+  const sendTelegram = opts?.sendTelegram ?? sendMessage;
+
+  async function handleSendCanned(
+    ws: WebSocket,
+    payload: { messageId?: unknown; slot?: unknown; idempotencyKey?: unknown },
+  ): Promise<void> {
+    if (
+      typeof payload.messageId !== "string" ||
+      typeof payload.slot !== "number" ||
+      typeof payload.idempotencyKey !== "string"
+    ) {
+      return;
+    }
+    let result;
+    try {
+      result = await sendCanned(
+        {
+          messageId: payload.messageId,
+          slot: payload.slot,
+          idempotencyKey: payload.idempotencyKey,
+        },
+        sendTelegram,
+      );
+    } catch {
+      ws.send(JSON.stringify({ type: "error", code: "send-failed" }));
+      return;
+    }
+    if (result.ok) {
+      ws.send(JSON.stringify({ type: "receipt", ...result.receipt }));
+    } else {
+      ws.send(JSON.stringify({ type: "error", code: result.code }));
+    }
+  }
 
   function broadcast(msg: unknown) {
     const data = JSON.stringify(msg);
@@ -64,6 +104,15 @@ export function createHub() {
         return;
       }
       broadcast({ type: "replies-updated", replies: getReplies() });
+    } else if (type === "send-canned") {
+      void handleSendCanned(
+        ws,
+        msg as {
+          messageId?: unknown;
+          slot?: unknown;
+          idempotencyKey?: unknown;
+        },
+      );
     }
     // Unknown types are ignored.
   }

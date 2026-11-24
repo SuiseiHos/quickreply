@@ -128,7 +128,10 @@ export function replyMenuScreen(
   return lines.join("\n");
 }
 
-/** Receipt screen (Screen 7): the sent time + the reply actually sent. */
+/** Receipt screen (Screen 7): the sent time + the reply actually sent.
+ * No checkmark glyph: "✓" does not render in the glasses font (it shows
+ * as a blank gap — verified on the live receipt 24 Nov 2026). Plain
+ * ASCII "Sent HH:MM" reads cleanly. */
 export function receiptScreen(
   chatTitle: string,
   replyText: string,
@@ -136,7 +139,7 @@ export function receiptScreen(
 ): string {
   const hh = String(sentAt.getHours()).padStart(2, "0");
   const mm = String(sentAt.getMinutes()).padStart(2, "0");
-  return [`Sent ✓ ${hh}:${mm}`, "", `${chatTitle}: ${replyText}`].join("\n");
+  return [`Sent ${hh}:${mm}`, "", `${chatTitle}: ${replyText}`].join("\n");
 }
 
 /** Error screen (Screen 8): the failure + how to recover. */

@@ -58,6 +58,21 @@ export type BotIdentity = {
   can_read_all_group_messages: boolean;
 };
 
+/** The shape a Telegram send returns: the sent message. */
+export type SentMessage = {
+  message_id: number;
+  chat: unknown;
+  date: number;
+  text: string;
+};
+
+/** Sends a text message; the transport is injectable so tests can use a
+ * fake instead of delivering a real message to a real chat. */
+export type SendTelegramFn = (
+  chatId: number,
+  text: string,
+) => Promise<SentMessage>;
+
 /** Live getMe (read-only): proves the token + helper path work. */
 export async function getMe(): Promise<{ ok: boolean; result: BotIdentity }> {
   const res = await callHelper(["getme"], 30000);
@@ -66,6 +81,31 @@ export async function getMe(): Promise<{ ok: boolean; result: BotIdentity }> {
   }
   return res as unknown as { ok: boolean; result: BotIdentity };
 }
+
+/**
+ * Sends a text message to a chat (silent: disable_notification=true, so
+ * the reply does not buzz the user's phone). Returns the sent message,
+ * including its Telegram message_id.
+ */
+export const sendMessage: SendTelegramFn = async (chatId, text) => {
+  const res = await callHelper(
+    [
+      "sendmessage",
+      "--chat-id",
+      String(chatId),
+      "--text",
+      text,
+      "--disable-notification",
+    ],
+    30000,
+  );
+  if (res.ok !== true) {
+    throw new Error(
+      `sendMessage failed: ${JSON.stringify(res).slice(0, 200)}`,
+    );
+  }
+  return res.result as SentMessage;
+};
 
 /** One long-poll round. Returns the raw updates array. */
 export async function fetchUpdates(

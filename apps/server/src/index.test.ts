@@ -29,8 +29,7 @@ beforeEach(() => {
   __clearAllForTests();
 });
 
-async function boot() {
-  const hub = createHub();
+async function boot(hub = createHub()) {
   const server = createServer(hub);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -181,6 +180,111 @@ test("WS update-replies rejects an over-long reply with an error", async () => {
       const msg = await reply;
       expect(msg.type).toBe("error");
       expect(msg.code).toBe("bad-replies");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS send-canned returns a receipt and calls Telegram once", async () => {
+  saveMessage(FIXTURE);
+  const calls: { chatId: number; text: string }[] = [];
+  const hub = createHub({
+    sendTelegram: async (chatId, text) => {
+      calls.push({ chatId, text });
+      return { message_id: 99, chat: { id: chatId }, date: 1795524000, text };
+    },
+  });
+  const { server, port } = await boot(hub);
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-canned",
+          messageId: "-123:7",
+          slot: 0,
+          idempotencyKey: "ws-key-1",
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("receipt");
+      expect(msg.messageId).toBe("-123:7");
+      expect(msg.chatTitle).toBe("Ops");
+      expect(msg.text).toBe("On my way");
+      expect(typeof msg.sentAt).toBe("string");
+      expect(calls).toEqual([{ chatId: -123, text: "On my way" }]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS send-canned re-send with the same key returns the stored receipt", async () => {
+  saveMessage(FIXTURE);
+  const calls: { chatId: number; text: string }[] = [];
+  const hub = createHub({
+    sendTelegram: async (chatId, text) => {
+      calls.push({ chatId, text });
+      return { message_id: 99, chat: { id: chatId }, date: 1795524000, text };
+    },
+  });
+  const { server, port } = await boot(hub);
+  try {
+    const ws = await connect(port);
+    try {
+      const first = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-canned",
+          messageId: "-123:7",
+          slot: 0,
+          idempotencyKey: "ws-key-2",
+        }),
+      );
+      const receipt1 = await first;
+      const second = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-canned",
+          messageId: "-123:7",
+          slot: 0,
+          idempotencyKey: "ws-key-2",
+        }),
+      );
+      const receipt2 = await second;
+      expect(receipt2).toEqual(receipt1);
+      expect(calls).toHaveLength(1);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS send-canned for an unknown message returns an error", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "send-canned",
+          messageId: "-123:999",
+          slot: 0,
+          idempotencyKey: "ws-key-3",
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("unknown-chat");
     } finally {
       ws.close();
     }
