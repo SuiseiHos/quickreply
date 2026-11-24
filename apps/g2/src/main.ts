@@ -26,7 +26,7 @@ import {
   transcribingScreen,
   type InboxMessage,
 } from "./screens";
-import { renderReplyPanel, setPanelStatus } from "./phone-panel";
+import { renderReplyPanel, setPanelStatus, type PanelChat } from "./phone-panel";
 
 const HOME_CONTAINER_ID = 1;
 const HOME_CONTAINER_NAME = "home";
@@ -71,6 +71,8 @@ let replies: string[] = [
   "Yes",
   "No",
 ];
+/** Chats the bot has seen, with their allowlist flags (Task 8). */
+let chats: PanelChat[] = [];
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -146,7 +148,6 @@ function currentScreenText(): string {
 
 function render(): void {
   showText(currentScreenText());
-  const chats = [...new Set(messages.map((m) => m.chat_title))];
   renderReplyPanel(replies, chats, {
     onSave: (next) => {
       savePending = true;
@@ -157,6 +158,9 @@ function render(): void {
       transcriptSavePending = true;
       setPanelStatus("Saving...");
       sendToServer({ type: "update-transcript", messageId, text });
+    },
+    onToggleChat: (chatId, allowed) => {
+      sendToServer({ type: "set-chat-allowed", chat_id: chatId, allowed });
     },
   },
   // The phone panel shows the voice-reply editor only while a review
@@ -490,16 +494,23 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
     if (Array.isArray(payload.replies)) {
       replies = payload.replies as string[];
     }
+    if (Array.isArray(payload.chats)) {
+      chats = payload.chats as PanelChat[];
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
+    render();
+  } else if (type === "chats-updated") {
+    const next = (msg as { chats?: unknown }).chats;
+    if (Array.isArray(next)) chats = next as PanelChat[];
     render();
   } else if (type === "message") {
     const m = (msg as { message?: unknown }).message as InboxMessage;

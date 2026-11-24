@@ -11,6 +11,11 @@ import {
   listInbox,
   getOffset,
   setOffset,
+  recordKnownChat,
+  isAllowedChat,
+  setChatAllowed,
+  listKnownChats,
+  seedAllowedFromMessages,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -113,5 +118,52 @@ test("listChats returns each chat once", () => {
   expect(listChats()).toEqual([
     { chat_id: -456, chat_title: "Alerts" },
     { chat_id: -123, chat_title: "Ops" },
+  ]);
+});
+
+// --- Task 8: chat allowlist (default-deny) ---
+
+test("an unknown chat is not allowed by default", () => {
+  expect(isAllowedChat(-123)).toBe(false);
+  expect(listKnownChats()).toEqual([]);
+});
+
+test("recordKnownChat reports first sighting, then repeats", () => {
+  expect(recordKnownChat(-123, "Ops")).toBe(true);
+  expect(recordKnownChat(-123, "Ops")).toBe(false);
+  expect(recordKnownChat(-123, "Ops Renamed")).toBe(false);
+  expect(listKnownChats()).toEqual([
+    { chat_id: -123, chat_title: "Ops Renamed", allowed: false },
+  ]);
+});
+
+test("setChatAllowed refuses an unknown chat", () => {
+  expect(setChatAllowed(-123, true)).toBe(false);
+  expect(isAllowedChat(-123)).toBe(false);
+});
+
+test("setChatAllowed toggles a known chat both ways", () => {
+  recordKnownChat(-123, "Ops");
+  expect(setChatAllowed(-123, true)).toBe(true);
+  expect(isAllowedChat(-123)).toBe(true);
+  expect(setChatAllowed(-123, false)).toBe(true);
+  expect(isAllowedChat(-123)).toBe(false);
+  expect(listKnownChats()).toEqual([
+    { chat_id: -123, chat_title: "Ops", allowed: false },
+  ]);
+});
+
+test("seedAllowedFromMessages grandfathers chats with stored messages", () => {
+  saveMessage(FIXTURE);
+  saveMessage({ ...FIXTURE, id: "-456:1", update_id: 1002, chat_id: -456, chat_title: "Alerts" });
+  expect(seedAllowedFromMessages()).toBe(2);
+  expect(isAllowedChat(-123)).toBe(true);
+  expect(isAllowedChat(-456)).toBe(true);
+  expect(isAllowedChat(-789)).toBe(false);
+  // Idempotent: a second seed inserts nothing new.
+  expect(seedAllowedFromMessages()).toBe(0);
+  expect(listKnownChats()).toEqual([
+    { chat_id: -456, chat_title: "Alerts", allowed: true },
+    { chat_id: -123, chat_title: "Ops", allowed: true },
   ]);
 });

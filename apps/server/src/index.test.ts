@@ -6,6 +6,9 @@ import { createServer, createHub } from "./index.js";
 import {
   saveMessage,
   listInbox,
+  recordKnownChat,
+  isAllowedChat,
+  setChatAllowed,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -470,6 +473,99 @@ test("WS update-transcript for an unknown message returns unknown-chat", async (
       const msg = await reply;
       expect(msg.type).toBe("error");
       expect(msg.code).toBe("unknown-chat");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+// --- Task 8: chat allowlist over WS ---
+
+test("WS list-inbox carries the known chats with their allowed flags", async () => {
+  saveMessage(FIXTURE);
+  recordKnownChat(-123, "Ops");
+  setChatAllowed(-123, true);
+  recordKnownChat(-456, "Alerts");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg = await reply;
+      expect(msg.type).toBe("inbox");
+      expect(msg.chats).toEqual([
+        { chat_id: -456, chat_title: "Alerts", allowed: false },
+        { chat_id: -123, chat_title: "Ops", allowed: true },
+      ]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-allowed updates the DB and broadcasts chats-updated", async () => {
+  recordKnownChat(-456, "Alerts");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(
+        JSON.stringify({ type: "set-chat-allowed", chat_id: -456, allowed: true }),
+      );
+      const msg = await pushed;
+      expect(msg.type).toBe("chats-updated");
+      expect(msg.chats).toEqual([
+        { chat_id: -456, chat_title: "Alerts", allowed: true },
+      ]);
+      expect(isAllowedChat(-456)).toBe(true);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-allowed for an unknown chat replies unknown-chat", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({ type: "set-chat-allowed", chat_id: -999, allowed: true }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("unknown-chat");
+      expect(isAllowedChat(-999)).toBe(false);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-allowed with a malformed payload is ignored, no crash", async () => {
+  recordKnownChat(-456, "Alerts");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      ws.send(JSON.stringify({ type: "set-chat-allowed", chat_id: "-456", allowed: "yes" }));
+      // The server must stay alive: a list-inbox right after still answers.
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg = await reply;
+      expect(msg.type).toBe("inbox");
+      expect(isAllowedChat(-456)).toBe(false);
     } finally {
       ws.close();
     }

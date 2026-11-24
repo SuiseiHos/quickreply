@@ -64,6 +64,16 @@ function getDb(): DatabaseSync {
       result_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS known_chats (
+      chat_id INTEGER PRIMARY KEY,
+      chat_title TEXT NOT NULL,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS allowed_chats (
+      chat_id INTEGER PRIMARY KEY,
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -137,6 +147,120 @@ export function listChats(): { chat_id: number; chat_title: string }[] {
     )
     .all() as { chat_id: number; chat_title: string }[];
   return rows;
+}
+
+// --- Task 8: chat allowlist (default-deny). The bot only listens to
+// chats the owner approved in the phone panel. A chat is "known" the
+// first time the bot sees a message from it; it becomes "allowed" only
+// by an explicit toggle (or by the one-time grandfather seed below).
+
+export type KnownChat = {
+  chat_id: number;
+  chat_title: string;
+  allowed: boolean;
+};
+
+/**
+ * Records a sighting of a chat (title refreshes on rename). Returns true
+ * when this is the FIRST time the bot has seen the chat.
+ */
+export function recordKnownChat(chatId: number, chatTitle: string): boolean {
+  // An ON CONFLICT DO UPDATE also reports changes === 1, so check first:
+  // only a genuinely new row counts as a first sighting.
+  const database = getDb();
+  const now = new Date().toISOString();
+  const existing = database
+    .prepare("SELECT chat_id FROM known_chats WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number } | undefined;
+  if (existing) {
+    database
+      .prepare(
+        "UPDATE known_chats SET chat_title = ?, last_seen_at = ? WHERE chat_id = ?",
+      )
+      .run(chatTitle, now, chatId);
+    return false;
+  }
+  database
+    .prepare(
+      "INSERT INTO known_chats (chat_id, chat_title, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(chatId, chatTitle, now, now);
+  return true;
+}
+
+/** True only when the chat is explicitly allowlisted. Unknown chats are denied. */
+export function isAllowedChat(chatId: number): boolean {
+  const row = getDb()
+    .prepare("SELECT chat_id FROM allowed_chats WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number } | undefined;
+  return row !== undefined;
+}
+
+/**
+ * Allows or blocks a KNOWN chat. Returns false (and changes nothing) for
+ * an unknown chat — the panel only ever shows known chats, so an unknown
+ * id here means a forged or stale message.
+ */
+export function setChatAllowed(chatId: number, allowed: boolean): boolean {
+  const known = getDb()
+    .prepare("SELECT chat_id FROM known_chats WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number } | undefined;
+  if (!known) return false;
+  const database = getDb();
+  if (allowed) {
+    database
+      .prepare(
+        "INSERT OR IGNORE INTO allowed_chats (chat_id, created_at) VALUES (?, ?)",
+      )
+      .run(chatId, new Date().toISOString());
+  } else {
+    database
+      .prepare("DELETE FROM allowed_chats WHERE chat_id = ?")
+      .run(chatId);
+  }
+  return true;
+}
+
+/** Every chat the bot has ever seen, with its allowed flag, by title. */
+export function listKnownChats(): KnownChat[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT k.chat_id, k.chat_title,
+              CASE WHEN a.chat_id IS NULL THEN 0 ELSE 1 END AS allowed
+       FROM known_chats k LEFT JOIN allowed_chats a ON a.chat_id = k.chat_id
+       ORDER BY k.chat_title ASC`,
+    )
+    .all() as { chat_id: number; chat_title: string; allowed: number }[];
+  return rows.map((r) => ({
+    chat_id: r.chat_id,
+    chat_title: r.chat_title,
+    allowed: r.allowed === 1,
+  }));
+}
+
+/**
+ * One-time grandfathering: every chat that already has stored messages
+ * (i.e. chats the owner added the bot to before the allowlist existed)
+ * becomes allowed. Idempotent — returns how many chats were newly allowed.
+ * Chats first seen AFTER this runs are NOT grandfathered; they need an
+ * explicit toggle.
+ */
+export function seedAllowedFromMessages(): number {
+  const database = getDb();
+  const chats = database
+    .prepare("SELECT DISTINCT chat_id, chat_title FROM messages")
+    .all() as { chat_id: number; chat_title: string }[];
+  let newly = 0;
+  for (const c of chats) {
+    recordKnownChat(c.chat_id, c.chat_title);
+    const result = database
+      .prepare(
+        "INSERT OR IGNORE INTO allowed_chats (chat_id, created_at) VALUES (?, ?)",
+      )
+      .run(c.chat_id, new Date().toISOString());
+    newly += Number(result.changes);
+  }
+  return newly;
 }
 
 export type StoredSend = {
@@ -247,6 +371,6 @@ export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
   getDb().exec(
-    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys;",
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats;",
   );
 }

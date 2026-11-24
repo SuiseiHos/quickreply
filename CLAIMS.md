@@ -23,6 +23,7 @@ screenshot Sui read herself. Nothing here is a builder's assertion.
 | 6 | On my way | C2 canned, sim (video take 1) | 9 | 24 Nov 20:39 |
 | 7 | On my way | C2 canned, sim (video take 2) | 10 | 24 Nov 20:42 |
 | 8 | On my way, I'll be there in five minutes. | C1 voice, sim + WAV injection (video frames) | 11 | 24 Nov 20:45 |
+| 9 | On my way | C2 canned, sim (T8 allowlist regression — DM, grandfathered chat) | 12 | 24 Nov 21:54 |
 
 Idempotency: the same key sent twice returned the identical stored
 receipt with exactly one Telegram call and one `send_keys` row.

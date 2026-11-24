@@ -8,6 +8,8 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import {
   getOffset,
+  isAllowedChat,
+  recordKnownChat,
   saveMessage,
   setOffset,
   type IncomingMessage,
@@ -171,17 +173,26 @@ export function parseUpdate(update: unknown): IncomingMessage | null {
 
 export type PollerOptions = {
   onMessage: (m: IncomingMessage) => void;
+  /** Fires the first time a chat is seen (so the phone panel can show it
+   * as pending approval). Fires for allowed chats too — once, on sighting. */
+  onNewChat?: (chat: { chat_id: number; chat_title: string }) => void;
   onError?: (err: unknown) => void;
   /** Long-poll timeout per round in seconds (Telegram allows up to 50). */
   pollTimeoutSec?: number;
+  /** Injectable fetch for tests; defaults to the real helper long-poll. */
+  fetchUpdates?: (offset: number, timeoutSec: number) => Promise<unknown[]>;
 };
 
 /**
- * Long-poll loop: fetches updates, stores new text messages (dedupe by
- * update_id), advances the persisted offset past every seen update, and
- * calls onMessage for each newly stored message. Never throws: a failed
- * round logs and retries after 5 s. stop() ends the loop and kills an
- * in-flight helper call.
+ * Long-poll loop: fetches updates, records every seen chat, stores and
+ * forwards ONLY messages from allowlisted chats (Task 8, default-deny),
+ * advances the persisted offset past every seen update — including dropped
+ * ones, so a blocked chat never causes a re-fetch loop — and calls
+ * onMessage for each newly stored message. The bot has no commands:
+ * message text is never executed; a "/anything" from anyone is just text
+ * (dropped unless its chat is allowlisted). Never throws: a failed round
+ * logs and retries after 5 s. stop() ends the loop and kills an in-flight
+ * helper call.
  */
 export function startPoller(opts: PollerOptions): { stop: () => void } {
   const pollTimeoutSec = opts.pollTimeoutSec ?? 30;
@@ -223,11 +234,13 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
     return res.result;
   }
 
+  const fetchRound = opts.fetchUpdates ?? fetchOnce;
+
   async function loop(): Promise<void> {
     while (!stopped) {
       try {
         const offset = getOffset();
-        const updates = await fetchOnce();
+        const updates = await fetchRound(offset, pollTimeoutSec);
         let maxId = offset;
         for (const update of updates) {
           const updateId = (update as { update_id?: unknown }).update_id;
@@ -235,7 +248,15 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
             maxId = updateId;
           }
           const msg = parseUpdate(update);
-          if (msg && saveMessage(msg)) opts.onMessage(msg);
+          if (!msg) continue;
+          // Every sighting is recorded (the phone panel shows pending
+          // chats); only allowlisted chats reach the inbox + glasses.
+          if (recordKnownChat(msg.chat_id, msg.chat_title)) {
+            opts.onNewChat?.({ chat_id: msg.chat_id, chat_title: msg.chat_title });
+          }
+          if (isAllowedChat(msg.chat_id) && saveMessage(msg)) {
+            opts.onMessage(msg);
+          }
         }
         if (maxId > offset) setOffset(maxId + 1);
       } catch (err) {

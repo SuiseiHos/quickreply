@@ -10,7 +10,10 @@ import {
   getMessage,
   getReplies,
   listInbox,
+  listKnownChats,
   markRead,
+  seedAllowedFromMessages,
+  setChatAllowed,
   setReplies,
 } from "./message-store.js";
 import { sendCanned, sendText, type SendResult } from "./send.js";
@@ -122,8 +125,21 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
           type: "inbox",
           messages: listInbox(),
           replies: getReplies(),
+          chats: listKnownChats(),
         }),
       );
+    } else if (type === "set-chat-allowed") {
+      // Phone-panel allowlist toggle (Task 8): only the local panel can
+      // change it, and only for a chat the bot has already seen. A toggle
+      // for an unknown chat is rejected — it means a forged or stale id.
+      const chatId = (msg as { chat_id?: unknown }).chat_id;
+      const allowed = (msg as { allowed?: unknown }).allowed;
+      if (typeof chatId !== "number" || typeof allowed !== "boolean") return;
+      if (!setChatAllowed(chatId, allowed)) {
+        ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
+        return;
+      }
+      broadcast({ type: "chats-updated", chats: listKnownChats() });
     } else if (type === "open-message") {
       const messageId = (msg as { messageId?: unknown }).messageId;
       if (typeof messageId !== "string") return;
@@ -248,9 +264,20 @@ const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   const hub = createHub();
   const server = createServer(hub);
-  server.listen(PORT, () => {
-    console.log(`QuickReply server listening on :${PORT}`);
+  // Localhost only (Task 8): the WS is the bot's only control surface —
+  // sends, reply edits, allowlist toggles — so it must not be reachable
+  // from the network. Correct for the simulator demo (the webview runs on
+  // this VM); a public host later needs a shared secret + TLS, not just
+  // a bind change.
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`QuickReply server listening on 127.0.0.1:${PORT}`);
   });
+  // Grandfather the chats the bot already serves (Task 8): they were added
+  // by the owner before the allowlist existed.
+  const seeded = seedAllowedFromMessages();
+  if (seeded > 0) {
+    console.log(`[QuickReply] allowlist: grandfathered ${seeded} chat(s)`);
+  }
   // Telegram poller: pushes each new message to all connected glasses.
   startPoller({
     onMessage: (message) => {
@@ -258,6 +285,9 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
         `[QuickReply] new message from ${message.chat_title}: ${message.text.slice(0, 60)}`,
       );
       hub.broadcast({ type: "message", message });
+    },
+    onNewChat: () => {
+      hub.broadcast({ type: "chats-updated", chats: listKnownChats() });
     },
     onError: (err) =>
       console.error(

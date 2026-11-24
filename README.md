@@ -12,7 +12,7 @@ Built for the [Even Realities hackathon](https://dorahacks.io/hackathon/even-rea
 
 - **C2 — canned replies.** Five replies you edit from the phone panel. Two taps from the inbox to a sent message, with a `Sent HH:MM` receipt.
 - **C1 — voice replies.** Speak on the glasses mic; local faster-whisper (small.en) transcribes on the backend; the glasses show the transcript for review (`To <chat>:` + text) before anything is sent. Tap sends, swipe up edits on the phone, swipe down discards.
-- **A real write, not a read-only demo.** Every send is a real `sendMessage` to a real Telegram group, delivered through the Telegram Bot API. The demo sent 8 real messages (see [CLAIMS.md](CLAIMS.md)).
+- **A real write, not a read-only demo.** Every send is a real `sendMessage` to a real Telegram group, delivered through the Telegram Bot API. The demo sent 9 real messages (see [CLAIMS.md](CLAIMS.md)).
 - **A gate, not a guess.** Every send passes the same server-enforced gate: non-empty after trim (G1), at most 4096 characters — never silently truncated (G2), to a chat the bot has actually seen (G3), once per idempotency key — a double-tap returns the stored receipt and sends nothing twice (G4), and the review always shows `To <chat>:` so you never reply to the wrong chat (G5).
 - **Failure is a screen, not a crash.** Empty audio → `Nothing heard — try again`. Transcription failure → `Couldn't hear that. Tap to try again.` A transcript for another message never clobbers the screen you are on (regression-tested live). The server restarts mid-demo and the glasses reconnect on their own.
 
@@ -31,7 +31,7 @@ Telegram Bot API  (bot @quickreply_g2_bot, privacy mode off)
    +-- local faster-whisper (small.en, int8) for voice replies only
 ```
 
-- `apps/g2/` — the glasses app: an 8-screen state machine (Home, Inbox, Message, Reply menu, Recording, Transcript review, Receipt, Empty/error) plus the phone panel (reply editor + voice-reply editor + chat list).
+- `apps/g2/` — the glasses app: an 8-screen state machine (Home, Inbox, Message, Reply menu, Recording, Transcript review, Receipt, Empty/error) plus the phone panel (reply editor + voice-reply editor + chat allowlist toggles).
 - `apps/server/` — the backend: Telegram poller (offset persisted in SQLite, dedupe by `update_id`), the message/reply/send-key stores, the send gate, the Whisper subprocess, and the WebSocket hub. The Telegram token never lives in the server: every Bot API call shells out to a helper (`TELEGRAM_HELPER_PATH`, defaulting to the vaulted-connector helper) that performs the credential exchange per call.
 - `apps/server/scripts/smoke-test.ts` — one command that boots the real server and drives the whole golden path over a real WebSocket (9 steps, fakes only at the Telegram/Whisper boundary).
 - `CLAIMS.md` — the evidence ledger: every claim, with its test run, live Telegram message_id, or screenshot.
@@ -71,7 +71,9 @@ cd apps/g2 && npm run dev   # serves the app; load it in the Even Hub simulator
 - **English voice only.** Voice replies transcribe with `small.en`. The canned replies work in any language.
 - **Whisper hallucinates on silence.** One second of digital silence transcribed as "You". A silence gate (peak sample < 50) answers `empty` without loading the model, but quiet real speech near the threshold is untested.
 - **Send-failed retry and over-long transcripts are unit-tested only.** There is no live trigger for a failed Telegram send without breaking the real call, and a live >4096-character transcript needs ~10 minutes of speech.
-- **One bot, all chats.** The inbox shows every chat the bot has been added to; there is no per-chat allowlist in v1.
+- **Chat allowlist (default-deny).** Only chats you approve in the phone panel reach the glasses. A new chat the bot is added to shows as pending — its messages are dropped, not stored — until you check it. Chats the bot already served before the allowlist existed were grandfathered in.
+- **No remote control.** The bot has no Telegram commands: message text is never executed, and nobody can make the bot do anything from Telegram — the only state-changing inputs are the glasses and the phone panel, over a local WebSocket. The server binds `127.0.0.1` only. (Group admins can still remove or restrict the bot; that is Telegram-side and cannot be prevented in code.)
+- **One bot, all chats — now gated.** The inbox shows only allowlisted chats (see above).
 
 ## Prior work declared
 

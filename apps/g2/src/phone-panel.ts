@@ -8,6 +8,15 @@ export type ReplyPanelCallbacks = {
   onSave: (replies: string[]) => void;
   /** User saved the voice reply under review (Task 5). */
   onSaveVoice?: (messageId: string, text: string) => void;
+  /** User flipped a chat's allowlist toggle (Task 8). */
+  onToggleChat?: (chatId: number, allowed: boolean) => void;
+};
+
+/** A chat the bot has seen, with its allowlist flag (Task 8). */
+export type PanelChat = {
+  chat_id: number;
+  chat_title: string;
+  allowed: boolean;
 };
 
 /** A voice reply under review on the glasses (Task 5). */
@@ -68,15 +77,16 @@ function button(
 
 /**
  * Render the reply editor into #app: 5 text inputs (one per slot, max 64
- * chars), a Save button, a status line, and a read-only list of chats the
- * bot has seen. When a voice reply is under review on the glasses, a
- * second section edits that transcript (max 4096 chars) — the Edit path
- * for the review screen and the too-long offer. Re-rendering with
- * unchanged inputs is a no-op, so typing is never wiped by an inbox update.
+ * chars), a Save button, a status line, and the chat allowlist (Task 8):
+ * one toggle per chat the bot has seen — only allowlisted chats reach the
+ * glasses. When a voice reply is under review on the glasses, a second
+ * section edits that transcript (max 4096 chars) — the Edit path for the
+ * review screen and the too-long offer. Re-rendering with unchanged inputs
+ * is a no-op, so typing is never wiped by an inbox update.
  */
 export function renderReplyPanel(
   replies: string[],
-  chats: string[],
+  chats: PanelChat[],
   cb: ReplyPanelCallbacks,
   voice?: VoiceReply | null,
 ): void {
@@ -101,10 +111,36 @@ export function renderReplyPanel(
   statusEl.style.margin = "12px 0 0";
   statusEl.style.color = "inherit";
 
-  const chatList = document.createElement("p");
-  chatList.style.margin = "12px 0 0";
-  chatList.textContent =
-    chats.length > 0 ? `Chats: ${chats.join(", ")}` : "No chats yet";
+  const chatTitle = document.createElement("h2");
+  chatTitle.textContent = "Chats — only checked chats reach the glasses";
+  chatTitle.style.margin = "20px 0 8px";
+  chatTitle.style.fontSize = "16px";
+
+  const chatList = document.createElement("div");
+  if (chats.length === 0) {
+    const empty = document.createElement("p");
+    empty.style.margin = "0";
+    empty.textContent = "No chats yet";
+    chatList.append(empty);
+  }
+  for (const chat of chats) {
+    const row = document.createElement("label");
+    row.style.display = "block";
+    row.style.fontSize = "16px";
+    row.style.padding = "6px 0";
+    row.style.cursor = "pointer";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = chat.allowed;
+    box.style.marginRight = "8px";
+    box.addEventListener("change", () => {
+      cb.onToggleChat?.(chat.chat_id, box.checked);
+    });
+    row.append(box, document.createTextNode(
+      chat.allowed ? chat.chat_title : `${chat.chat_title} (pending)`,
+    ));
+    chatList.append(row);
+  }
 
   appEl.append(
     button("Save replies", () => {
@@ -116,6 +152,7 @@ export function renderReplyPanel(
       cb.onSave(next);
     }, true),
     statusEl,
+    chatTitle,
     chatList,
   );
 
