@@ -1,4 +1,4 @@
-// Whisper STT (Task 5) — local faster-whisper via a Python subprocess.
+// Whisper STT — local faster-whisper via a Python subprocess.
 // No AI/LLM and no API key anywhere: DEEP-DIVE §2 specifies local
 // faster-whisper (small.en, int8), keyless and on-device. The transcriber
 // runs from the repo venv (apps/server/.venv) and reads its model from
@@ -31,7 +31,7 @@ const TRANSCRIBE_TIMEOUT_MS = 120000;
  * Default model cache. On this VM the models already live in the shared
  * cache, so use it when it exists; on a fresh checkout elsewhere, fall
  * back to a repo-local cache (gitignored) and faster-whisper downloads
- * small.en on first use (review F8). HF_HOME always wins when set.
+ * small.en on first use. HF_HOME always wins when set.
  */
 const SHARED_HF_CACHE = "/home/hatch/workspace/tmp/hf-cache";
 const LOCAL_HF_CACHE = fileURLToPath(new URL("../.hf-cache", import.meta.url));

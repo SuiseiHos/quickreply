@@ -1,6 +1,5 @@
 // QuickReply — reply to Telegram messages from Even G2 glasses.
 // State machine: home / inbox / message / menu / sending / receipt / error.
-// Task 3: C2 screens. Task 4: send path + receipt. Task 5: voice mode.
 
 import {
   CreateStartUpPageContainer,
@@ -38,7 +37,7 @@ const RECEIPT_HOLD_MS = 5000;
 const SERVER_WS_URL =
   import.meta.env.VITE_SERVER_WS_URL ?? "ws://localhost:3000";
 
-/** Receipt payload (defined here, produced by the server in Task 4). */
+/** Receipt payload (defined here, produced by the server). */
 type ReceiptMessage = {
   type: "receipt";
   messageId: string;
@@ -71,7 +70,7 @@ let replies: string[] = [
   "Yes",
   "No",
 ];
-/** Chats the bot has seen, with their allowlist flags (Task 8). */
+/** Chats the bot has seen, with their allowlist flags. */
 let chats: PanelChat[] = [];
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
@@ -235,7 +234,7 @@ function sendCanned(): void {
   render();
 }
 
-/** Start a voice reply (Task 5): the message screen's swipe-up. On real
+/** Start a voice reply: the message screen's swipe-up. On real
  * hardware the mic stream starts here (bridge.audioControl); in the
  * simulator the audio comes from the injection harness. */
 function startRecording(): void {
@@ -268,7 +267,7 @@ function cancelRecording(): void {
 }
 
 /** Tap on the review screen: send the transcript through the same gate
- * + receipt as a canned reply (Task 4). */
+ * + receipt as a canned reply. */
 function sendVoice(): void {
   if (!voiceMessage) return;
   const key = newIdempotencyKey();

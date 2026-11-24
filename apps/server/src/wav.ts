@@ -1,4 +1,4 @@
-// WAV helpers (Task 5): 16 kHz mono s16le PCM <-> RIFF/WAVE. Shared by
+// WAV helpers: 16 kHz mono s16le PCM <-> RIFF/WAVE. Shared by
 // the injection harness and the Whisper test.
 export const SAMPLE_RATE = 16000;
 export const FRAME_BYTES = 3200; // 100 ms of 16 kHz mono s16le audio

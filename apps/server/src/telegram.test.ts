@@ -87,7 +87,7 @@ test("parseUpdate ignores messages from other bots", () => {
   expect(parseUpdate(update)).toBeNull();
 });
 
-// Live, read-only — and skipped when the helper is absent (review F8),
+// Live, read-only — and skipped when the helper is absent,
 // so `npm test` stays portable on a fresh checkout without the vaulted
 // Telegram connection.
 const HELPER_PATH =
@@ -104,7 +104,7 @@ test.skipIf(!existsSync(HELPER_PATH))(
   30000,
 );
 
-// --- Task 8: poller allowlist gate + no remote control ---
+// --- poller allowlist gate + no remote control ---
 
 function groupUpdate(updateId: number, chatId: number, title: string, text: string) {
   return {
@@ -183,7 +183,7 @@ test("poller forwards a chat once it becomes allowed", async () => {
   expect(listInbox()).toHaveLength(1);
 });
 
-// --- Review F10: bot removal from a chat ---
+// --- bot removal from a chat ---
 
 test("parseChatMemberUpdate reports kicked/left, ignores the rest", () => {
   const kicked = {
@@ -251,11 +251,10 @@ test("poller removes an allowed chat when the bot is kicked", async () => {  rec
   expect(listInbox()).toHaveLength(0);
 });
 
-// --- TEST 2 "Halo" follow-up (24 Nov 22:18–22:22 WIB): the offset is
-// committed PER UPDATE, so a throw — or a restart — mid-batch cannot
-// leave an already-processed update unacknowledged. Telegram would then
-// re-deliver it, and a message dropped while its chat was pending could
-// be stored after the chat was approved.
+// The offset is committed PER UPDATE, so a throw — or a restart —
+// mid-batch cannot leave an already-processed update unacknowledged.
+// Telegram would then re-deliver it, and a message dropped while its
+// chat was pending could be stored after the chat was approved.
 test("offset commits per update when a later update in the batch throws", async () => {
   recordKnownChat(-123, "Ops");
   setChatAllowed(-123, true);

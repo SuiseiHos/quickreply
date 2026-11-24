@@ -121,7 +121,7 @@ test("listChats returns each chat once", () => {
   ]);
 });
 
-// --- Task 8: chat allowlist (default-deny) ---
+// --- chat allowlist (default-deny) ---
 
 test("an unknown chat is not allowed by default", () => {
   expect(isAllowedChat(-123)).toBe(false);
@@ -168,7 +168,7 @@ test("seedAllowedFromMessages grandfathers chats with stored messages", () => {
   ]);
 });
 
-// Review F1: the seed is ONE-TIME. A chat the user toggled off must stay
+// the seed is ONE-TIME. A chat the user toggled off must stay
 // off even when the server restarts (and re-runs the seed).
 test("seedAllowedFromMessages never re-allows a chat toggled off", () => {
   saveMessage(FIXTURE);

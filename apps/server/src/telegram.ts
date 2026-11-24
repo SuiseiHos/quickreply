@@ -1,4 +1,4 @@
-// Telegram Bot API client (Task 2). The token lives in the registered
+// Telegram Bot API client. The token lives in the registered
 // custom.telegram connection and is NEVER in this file, an env var, or a
 // log. Every call shells out to the connector helper, which performs the
 // surrogate exchange per call (see CONNECTOR.md: the raw-surrogate gotcha).
@@ -181,7 +181,7 @@ export type ChatMemberEvent = {
 /**
  * Converts a `my_chat_member` update into a removal event, or null.
  * Only kicked/left count: when a group admin removes the bot, the chat
- * must stop being allowlisted (review F10). A "member" (re-added) update
+ * must stop being allowlisted. A "member" (re-added) update
  * returns null — the chat stays as the panel left it, and the user can
  * re-allow it there.
  */
@@ -219,7 +219,7 @@ export type PollerOptions = {
 
 /**
  * Long-poll loop: fetches updates, records every seen chat, stores and
- * forwards ONLY messages from allowlisted chats (Task 8, default-deny),
+ * forwards ONLY messages from allowlisted chats (default-deny),
  * advances the persisted offset past every seen update — including dropped
  * ones, so a blocked chat never causes a re-fetch loop — and calls
  * onMessage for each newly stored message. The bot has no commands:
@@ -279,16 +279,13 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
           const updateId = (update as { update_id?: unknown }).update_id;
           if (typeof updateId === "number" && updateId > offset) {
             // Commit the offset PER UPDATE, right after that update is
-            // processed (review follow-up, TEST 2 "Halo" case, 24 Nov
-            // 22:18–22:22 WIB): the old code set the offset once at the
-            // end of the batch, so a throw — or a restart — mid-batch left
-            // the whole batch unacknowledged. Telegram then re-delivered
-            // it, and a message dropped while its chat was pending could
-            // be stored after the chat was approved. Per-update commits
-            // shrink that window to the milliseconds of one update; a
-            // re-fetch can still duplicate an ALLOWED message, but
-            // saveMessage dedupes by update_id, so nothing is lost and
-            // nothing is delivered twice.
+            // processed: committing once at the end of the batch means a
+            // throw — or a restart — mid-batch leaves the whole batch
+            // unacknowledged, and Telegram re-delivers it. Per-update
+            // commits shrink that window to the milliseconds of one
+            // update; a re-fetch can still duplicate an allowed message,
+            // but saveMessage dedupes by update_id, so nothing is lost
+            // and nothing is delivered twice.
             processUpdate(update);
             setOffset(updateId + 1);
           } else {
@@ -308,7 +305,7 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
   }
 
   function processUpdate(update: unknown): void {
-    // Bot removed from a chat (review F10): stop allowlisting it.
+    // Bot removed from a chat: stop allowlisting it.
     // History stays in the inbox; a reply attempt fails cleanly
     // at Telegram with send-failed.
     const removed = parseChatMemberUpdate(update);

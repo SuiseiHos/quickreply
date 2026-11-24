@@ -1,4 +1,4 @@
-// WS audio handler tests (Task 5): PCM frames → transcript broadcast,
+// WS audio handler tests: PCM frames → transcript broadcast,
 // with the transcriber faked (the real one is covered by whisper.test.ts).
 // Two sockets: the harness (sends audio) and the glasses (receives the
 // broadcast transcript) — the CallIt split-socket shape.
@@ -194,9 +194,9 @@ test("transcript-text broadcasts the typed transcript (test seam, flag on)", asy
   }
 });
 
-// Review F4: the transcript-text seam is gated behind an env flag, so a
+// the transcript-text seam is gated behind an env flag, so a
 // production server never accepts a typed transcript from any client.
-test("transcript-text is ignored without the flag (review F4)", async () => {
+test("transcript-text is ignored without the flag", async () => {
   delete process.env.QUICKREPLY_ALLOW_TRANSCRIPT_TEXT;
   saveMessage(FIXTURE);
   const { server, port } = await boot(async () => "unused");
@@ -225,7 +225,7 @@ test("transcript-text is ignored without the flag (review F4)", async () => {
   }
 });
 
-// Review F5: a recording longer than the PCM cap is rejected as too-long
+// a recording longer than the PCM cap is rejected as too-long
 // without loading the transcriber (and the buffer never grows past it).
 test("audio past the PCM cap returns too-long and never calls the transcriber", async () => {
   saveMessage(FIXTURE);
@@ -268,9 +268,8 @@ test("audio past the PCM cap returns too-long and never calls the transcriber", 
   }
 });
 
-// --- Task 6: the silence gate (Whisper hallucinates on silence —
-// FRICTION.md, T5). Near-silent audio returns `empty` WITHOUT calling
-// the transcriber. ---
+// The silence gate: Whisper hallucinates on silence. Near-silent
+// audio returns `empty` WITHOUT calling the transcriber.
 
 test("near-silent audio returns empty and never calls the transcriber", async () => {
   saveMessage(FIXTURE);

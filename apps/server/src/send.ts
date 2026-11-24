@@ -26,7 +26,7 @@ export type SendResult =
   | { ok: true; receipt: Receipt }
   | { ok: false; code: string };
 
-// In-flight sends by idempotency key (review F2): two concurrent sends
+// In-flight sends by idempotency key: two concurrent sends
 // with the same key share one Telegram call instead of both passing the
 // getSend check and sending twice. The entry is cleared on completion.
 const pendingSends = new Map<string, Promise<SendResult>>();
@@ -92,7 +92,7 @@ async function sendTextOnce(
     JSON.stringify(receipt),
   );
   // Re-read: if a concurrent same-key send recorded first, recordSend
-  // was a no-op and the stored receipt is the one to return (review F2).
+  // was a no-op and the stored receipt is the one to return.
   const after = getSend(idempotencyKey);
   const finalReceipt = after
     ? (JSON.parse(after.result_json) as Receipt)

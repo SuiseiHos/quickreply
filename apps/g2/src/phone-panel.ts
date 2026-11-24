@@ -1,4 +1,4 @@
-// Phone WebView panel (Task 3): the canned-reply editor shown on the
+// Phone WebView panel: the canned-reply editor shown on the
 // phone. Runs in the G2 page's #app element (the simulator's webview
 // screenshot shows this div). The panel never touches the store directly —
 // every action goes back through the server over the page's WebSocket via
@@ -6,20 +6,20 @@
 export type ReplyPanelCallbacks = {
   /** User tapped Save: send the edited reply slots to the server. */
   onSave: (replies: string[]) => void;
-  /** User saved the voice reply under review (Task 5). */
+  /** User saved the voice reply under review. */
   onSaveVoice?: (messageId: string, text: string) => void;
-  /** User flipped a chat's allowlist toggle (Task 8). */
+  /** User flipped a chat's allowlist toggle. */
   onToggleChat?: (chatId: number, allowed: boolean) => void;
 };
 
-/** A chat the bot has seen, with its allowlist flag (Task 8). */
+/** A chat the bot has seen, with its allowlist flag. */
 export type PanelChat = {
   chat_id: number;
   chat_title: string;
   allowed: boolean;
 };
 
-/** A voice reply under review on the glasses (Task 5). */
+/** A voice reply under review on the glasses. */
 export type VoiceReply = {
   messageId: string;
   text: string;
@@ -77,7 +77,7 @@ function button(
 
 /**
  * Render the reply editor into #app: 5 text inputs (one per slot, max 64
- * chars), a Save button, a status line, and the chat allowlist (Task 8):
+ * chars), a Save button, a status line, and the chat allowlist:
  * one toggle per chat the bot has seen — only allowlisted chats reach the
  * glasses. When a voice reply is under review on the glasses, a second
  * section edits that transcript (max 4096 chars) — the Edit path for the

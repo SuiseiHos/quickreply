@@ -1,4 +1,4 @@
-// QuickReply backend: Express + WebSocket on one port (Task 2).
+// QuickReply backend: Express + WebSocket on one port.
 // /health + WS router (list-inbox) + Telegram poller pushing new messages
 // to all connected glasses. No secret is needed to boot: the poller calls
 // the connector helper, which holds the token in the Vault.
@@ -129,7 +129,7 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
         }),
       );
     } else if (type === "set-chat-allowed") {
-      // Phone-panel allowlist toggle (Task 8): only the local panel can
+      // Phone-panel allowlist toggle: only the local panel can
       // change it, and only for a chat the bot has already seen. A toggle
       // for an unknown chat is rejected — it means a forged or stale id.
       const chatId = (msg as { chat_id?: unknown }).chat_id;
@@ -265,7 +265,7 @@ const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   const hub = createHub();
   const server = createServer(hub);
-  // Localhost only (Task 8): the WS is the bot's only control surface —
+  // Localhost only: the WS is the bot's only control surface —
   // sends, reply edits, allowlist toggles — so it must not be reachable
   // from the network. Correct for the simulator demo (the webview runs on
   // this VM); a public host later needs a shared secret + TLS, not just
@@ -273,7 +273,7 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
   server.listen(PORT, "127.0.0.1", () => {
     console.log(`QuickReply server listening on 127.0.0.1:${PORT}`);
   });
-  // Grandfather the chats the bot already serves (Task 8): they were added
+  // Grandfather the chats the bot already serves: they were added
   // by the owner before the allowlist existed.
   const seeded = seedAllowedFromMessages();
   if (seeded > 0) {

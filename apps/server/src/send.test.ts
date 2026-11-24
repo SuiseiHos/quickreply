@@ -115,7 +115,7 @@ test("a failed Telegram send returns send-failed and stores no key", async () =>
   expect(calls).toHaveLength(1);
 });
 
-// --- sendText (Task 5): the voice path resolves the text itself and
+// --- sendText: the voice path resolves the text itself and
 // shares the same gate + idempotency as the canned path. ---
 
 test("sendText sends free text and returns a receipt", async () => {
@@ -180,7 +180,7 @@ test("sendText re-send with the same key returns the stored receipt", async () =
   expect(second).toEqual(first);
 });
 
-// Review F2: two CONCURRENT sends with the same key share one Telegram
+// two CONCURRENT sends with the same key share one Telegram
 // call and return identical receipts (no double-send, no spurious error).
 test("concurrent sends with the same key share one Telegram call", async () => {
   const { fn, calls } = makeFake();

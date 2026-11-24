@@ -1,4 +1,4 @@
-// Message store (Task 2). SQLite via node:sqlite, one file:
+// Message store. SQLite via node:sqlite, one file:
 // apps/server/data/quickreply.db. Messages table per DEEP-DIVE §6.
 // Offset for the Telegram poller lives in the meta table so it advances
 // past every seen update, even ones with no text message.
@@ -149,7 +149,7 @@ export function listChats(): { chat_id: number; chat_title: string }[] {
   return rows;
 }
 
-// --- Task 8: chat allowlist (default-deny). The bot only listens to
+// --- chat allowlist (default-deny). The bot only listens to
 // chats the owner approved in the phone panel. A chat is "known" the
 // first time the bot sees a message from it; it becomes "allowed" only
 // by an explicit toggle (or by the one-time grandfather seed below).
@@ -243,7 +243,7 @@ export function listKnownChats(): KnownChat[] {
  * (i.e. chats the owner added the bot to before the allowlist existed)
  * becomes allowed. Runs ONCE — a `meta` flag records that it ran, so a
  * chat the user later toggled off is never silently re-allowed by a
- * server restart (review F1). Returns how many chats were newly allowed.
+ * server restart. Returns how many chats were newly allowed.
  * Chats first seen AFTER this runs are NOT grandfathered; they need an
  * explicit toggle.
  */
@@ -301,7 +301,7 @@ export function getSend(key: string): StoredSend | null {
 /**
  * Records a send under its idempotency key. INSERT OR IGNORE: if two
  * concurrent sends with the same key both passed getSend, only the first
- * write wins and the second is a silent no-op (review F2) — the caller
+ * write wins and the second is a silent no-op — the caller
  * re-reads the stored receipt instead of surfacing a spurious failure.
  */
 export function recordSend(

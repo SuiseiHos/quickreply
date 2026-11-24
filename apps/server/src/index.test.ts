@@ -296,7 +296,7 @@ test("WS send-canned for an unknown message returns an error", async () => {
   }
 });
 
-// --- Task 5: voice send + transcript edit over WS. ---
+// --- voice send + transcript edit over WS. ---
 
 function makeSendHub() {
   const calls: { chatId: number; text: string }[] = [];
@@ -481,7 +481,7 @@ test("WS update-transcript for an unknown message returns unknown-chat", async (
   }
 });
 
-// --- Task 8: chat allowlist over WS ---
+// --- chat allowlist over WS ---
 
 test("WS list-inbox carries the known chats with their allowed flags", async () => {
   saveMessage(FIXTURE);

@@ -167,7 +167,7 @@ test("errorScreen shows the failure and the retry gesture", () => {
   );
 });
 
-// --- Task 5: voice screens (recording / review / transcribing / edit). ---
+// --- voice screens (recording / review / transcribing / edit). ---
 
 test("recordingScreen shows REC and the chat being answered", () => {
   expect(recordingScreen("Ops")).toBe(
@@ -212,7 +212,7 @@ test("editHintScreen points at the phone panel", () => {
   );
 });
 
-// Review F7: no line may exceed 64 chars, even with a 60-char chat title
+// no line may exceed 64 chars, even with a 60-char chat title
 // and a 64-char canned reply (the old inbox fallback returned the full
 // first line, and the menu/receipt rendered the title untruncated).
 test("no screen line exceeds 64 chars with a long chat title", () => {

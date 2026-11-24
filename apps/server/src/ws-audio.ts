@@ -1,4 +1,4 @@
-// WebSocket audio upload handler (Task 5). No LLM: the transcript goes
+// WebSocket audio upload handler. No LLM: the transcript goes
 // straight to the glasses for the deterministic pre-send review.
 // Accumulates binary PCM frames per connection; on "audio-end" replies
 // with the transcript. The glasses and the injection harness are separate
@@ -7,7 +7,7 @@
 // reviewing that same message (the clobber guard lives in main.ts).
 // {type:"transcript-text"} is the typed-transcript test seam: it skips
 // audio and sends text straight through the same broadcast, and it only
-// works when QUICKREPLY_ALLOW_TRANSCRIPT_TEXT=1 (review F4).
+// works when QUICKREPLY_ALLOW_TRANSCRIPT_TEXT=1.
 import type { WebSocket } from "ws";
 import { transcribePcm } from "./whisper.js";
 import { getMessage } from "./message-store.js";
@@ -27,7 +27,7 @@ export function maxAbsSample(pcm: Buffer): number {
 }
 
 /** PCM cap: 10 minutes of 16 kHz mono s16le (~19 MB). A recording past
- * it is rejected as `too-long` without loading the model (review F5). */
+ * it is rejected as `too-long` without loading the model. */
 export const MAX_PCM_BYTES = 16000 * 2 * 600;
 
 export function createAudioHandler(opts: {
@@ -68,14 +68,14 @@ export function createAudioHandler(opts: {
     console.log(
       `[QuickReply] audio-end for ${messageId}: ${pcm.length} bytes`,
     );
-    // Over-cap recording (review F5): reject before the silence gate or
+    // Over-cap recording: reject before the silence gate or
     // the model ever sees it.
     if (session.bytes >= maxPcmBytes) {
       opts.broadcast({ type: "error", code: "too-long", messageId });
       return;
     }
-    // Silence gate (Task 6): Whisper hallucinates on near-silence (it
-    // transcribed 1 s of digital silence as "You" — FRICTION.md, T5).
+    // Silence gate: Whisper hallucinates on near-silence (it
+    // transcribed 1 s of digital silence as "You").
     // Below this peak the audio carries no speech, so answer `empty`
     // without loading the model. The fixture reply peaks at 32080; even
     // quiet speech peaks in the hundreds, so 50 is far from any real voice.
@@ -148,7 +148,7 @@ export function createAudioHandler(opts: {
       return true;
     }
     if (type === "transcript-text") {
-      // Test seam (review F4): typed transcripts are accepted ONLY when
+      // Test seam: typed transcripts are accepted ONLY when
       // the flag is set — never on a production server, where any local
       // client could otherwise forge a transcript and bypass STT and the
       // silence gate. When the flag is off, the message is not an audio

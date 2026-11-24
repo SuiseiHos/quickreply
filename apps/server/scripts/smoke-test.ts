@@ -1,4 +1,4 @@
-// Smoke test (Task 6): one command that boots the real server and drives
+// Smoke test: one command that boots the real server and drives
 // the whole golden path over a real WebSocket — inbox → open → canned
 // send → voice transcript → voice send → phone edit — plus the silence
 // gate. Telegram and Whisper are faked at the boundary (no real message

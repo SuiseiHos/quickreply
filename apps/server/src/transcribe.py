@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local Whisper STT for the QuickReply server (Task 4).
+"""Local Whisper STT for the QuickReply server.
 
 Reads a raw 16 kHz mono s16le PCM file, transcribes it with faster-whisper
 (small.en, int8) and prints {"text": "..."} as a single JSON line on stdout.

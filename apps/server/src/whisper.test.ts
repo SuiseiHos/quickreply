@@ -1,4 +1,4 @@
-// Whisper STT test (Task 5): the real local transcriber on the fixture
+// Whisper STT test: the real local transcriber on the fixture
 // reply. One test only — the model loads fresh on every call (~10 s on
 // this CPU), so the suite must not transcribe on every run. The exact
 // text is asserted: the same model + same audio is deterministic.

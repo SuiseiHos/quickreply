@@ -16,9 +16,9 @@ export type InboxMessage = {
 const LIST_LINE_MAX = 64;
 const INBOX_PAGE_SIZE = 5;
 
-/** A single display line, never longer than LIST_LINE_MAX (review F7:
- * long chat titles used to push inbox/receipt/menu lines past 64 chars,
- * and what the glasses do with an over-long line is unverified). */
+/** A single display line, never longer than LIST_LINE_MAX.
+ * Long chat titles used to push inbox/receipt/menu lines past 64 chars,
+ * and what the glasses do with an over-long line is unverified. */
 function oneLine(text: string): string {
   return text.length > LIST_LINE_MAX
     ? `${text.slice(0, LIST_LINE_MAX - 3)}...`

@@ -1,4 +1,4 @@
-// WAV-injection harness (Task 5): feeds a pre-recorded WAV through the
+// WAV-injection harness: feeds a pre-recorded WAV through the
 // same WebSocket binary-frame path as live glasses-mic audio.
 // The build VM has no microphone, so this is how voice is tested end to
 // end. Usage:
