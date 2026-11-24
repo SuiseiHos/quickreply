@@ -600,10 +600,13 @@ function handleServerMessage(raw: string): void {
     }
     // A voice error (broadcast with the message it answers) takes
     // precedence over a pending panel save: it applies only while
-    // recording, reviewing or transcribing THAT message.
+    // recording or transcribing THAT message — NOT on the review screen.
+    // A transcript was already accepted there, so an error for that
+    // message can only come from a duplicate/stale audio-end (review
+    // F6); a new recording moves the screen to "recording" first.
     if (typeof messageId === "string") {
       if (!voiceMessage || voiceMessage.id !== messageId) return;
-      if (screen !== "recording" && screen !== "review" && screen !== "transcribing") return;
+      if (screen !== "recording" && screen !== "transcribing") return;
       if (code === "empty") {
         errorText = "Nothing heard — try again";
       } else if (code === "stt-failed") {

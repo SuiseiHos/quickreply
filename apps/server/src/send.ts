@@ -26,7 +26,28 @@ export type SendResult =
   | { ok: true; receipt: Receipt }
   | { ok: false; code: string };
 
+// In-flight sends by idempotency key (review F2): two concurrent sends
+// with the same key share one Telegram call instead of both passing the
+// getSend check and sending twice. The entry is cleared on completion.
+const pendingSends = new Map<string, Promise<SendResult>>();
+
 export async function sendText(
+  input: { messageId: string; text: string; idempotencyKey: string },
+  sendTelegram: SendTelegramFn = sendMessage,
+): Promise<SendResult> {
+  const { messageId, text, idempotencyKey } = input;
+  const pending = pendingSends.get(idempotencyKey);
+  if (pending) return pending;
+  const run = sendTextOnce(input, sendTelegram);
+  pendingSends.set(idempotencyKey, run);
+  try {
+    return await run;
+  } finally {
+    pendingSends.delete(idempotencyKey);
+  }
+}
+
+async function sendTextOnce(
   input: { messageId: string; text: string; idempotencyKey: string },
   sendTelegram: SendTelegramFn = sendMessage,
 ): Promise<SendResult> {
@@ -70,10 +91,16 @@ export async function sendText(
     text,
     JSON.stringify(receipt),
   );
+  // Re-read: if a concurrent same-key send recorded first, recordSend
+  // was a no-op and the stored receipt is the one to return (review F2).
+  const after = getSend(idempotencyKey);
+  const finalReceipt = after
+    ? (JSON.parse(after.result_json) as Receipt)
+    : receipt;
   console.log(
     `[QuickReply] sent "${text}" to ${message.chat_title} (telegram message_id ${sent.message_id})`,
   );
-  return { ok: true, receipt };
+  return { ok: true, receipt: finalReceipt };
 }
 
 export async function sendCanned(

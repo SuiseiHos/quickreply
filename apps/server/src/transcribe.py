@@ -9,11 +9,8 @@ Raw PCM (not WAV): the server already holds PCM, and passing a numpy array
 skips faster-whisper's PyAV decoder, which is version-fragile (av 19
 dropped the metadata_errors argument faster-whisper 1.2.1 passes).
 
-Why local instead of the OpenAI API the plan names: a real OpenAI API key
-needs a paid OpenAI account (new accounts get no free API credit and must
-add a payment method), and no key exists in the vault. Same Whisper model
-family, same transcribePcm() interface — the server can swap in the
-OpenAI call later with a one-line change. See the ledger ruling.
+Why local: the app is no-AI by design (DEEP-DIVE §2) — transcription runs
+on-device with faster-whisper, no API key, nothing to leak.
 """
 import json
 import os

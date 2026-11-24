@@ -158,30 +158,109 @@ test("transcriber failure broadcasts an stt-failed error with the messageId", as
   }
 });
 
-test("transcript-text broadcasts the typed transcript (test seam)", async () => {
+test("transcript-text broadcasts the typed transcript (test seam, flag on)", async () => {
+  process.env.QUICKREPLY_ALLOW_TRANSCRIPT_TEXT = "1";
+  try {
+    saveMessage(FIXTURE);
+    const { server, port } = await boot(async () => "unused");
+    try {
+      const glasses = await connect(port);
+      const harness = await connect(port);
+      try {
+        const onGlasses = nextMessage(glasses);
+        harness.send(
+          JSON.stringify({
+            type: "transcript-text",
+            messageId: "-123:7",
+            text: "Typed reply here.",
+          }),
+        );
+        const msg = await onGlasses;
+        expect(msg).toEqual({
+          type: "transcript",
+          messageId: "-123:7",
+          chatTitle: "Ops",
+          text: "Typed reply here.",
+        });
+      } finally {
+        glasses.close();
+        harness.close();
+      }
+    } finally {
+      await shutdown(server);
+    }
+  } finally {
+    delete process.env.QUICKREPLY_ALLOW_TRANSCRIPT_TEXT;
+  }
+});
+
+// Review F4: the transcript-text seam is gated behind an env flag, so a
+// production server never accepts a typed transcript from any client.
+test("transcript-text is ignored without the flag (review F4)", async () => {
+  delete process.env.QUICKREPLY_ALLOW_TRANSCRIPT_TEXT;
   saveMessage(FIXTURE);
   const { server, port } = await boot(async () => "unused");
   try {
     const glasses = await connect(port);
     const harness = await connect(port);
     try {
-      const onGlasses = nextMessage(glasses);
+      const nothing = new Promise<string>((resolve) => {
+        glasses.once("message", () => resolve("got-message"));
+        setTimeout(() => resolve("timeout"), 200);
+      });
       harness.send(
         JSON.stringify({
           type: "transcript-text",
           messageId: "-123:7",
-          text: "Typed reply here.",
+          text: "Forged transcript.",
         }),
       );
-      const msg = await onGlasses;
-      expect(msg).toEqual({
-        type: "transcript",
-        messageId: "-123:7",
-        chatTitle: "Ops",
-        text: "Typed reply here.",
-      });
+      expect(await nothing).toBe("timeout");
     } finally {
       glasses.close();
+      harness.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+// Review F5: a recording longer than the PCM cap is rejected as too-long
+// without loading the transcriber (and the buffer never grows past it).
+test("audio past the PCM cap returns too-long and never calls the transcriber", async () => {
+  saveMessage(FIXTURE);
+  let calls = 0;
+  // The cap is an option so the test can use a tiny one (2 frames); the
+  // production default is 10 minutes of 16 kHz mono s16le (~19 MB).
+  const hub = createHub();
+  const server = createServer(hub, {
+    transcribe: async () => {
+      calls++;
+      return "should not be called";
+    },
+    maxPcmBytes: 6400,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("server has no address");
+  }
+  try {
+    const harness = await connect(address.port);
+    try {
+      const reply = nextMessage(harness);
+      // 3 frames of 3200 bytes with a 6400-byte cap: the recording is
+      // rejected as too-long.
+      harness.send(Buffer.alloc(3200, 1));
+      harness.send(Buffer.alloc(3200, 1));
+      harness.send(Buffer.alloc(3200, 1));
+      harness.send(JSON.stringify({ type: "audio-end", messageId: "-123:7" }));
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("too-long");
+      expect(msg.messageId).toBe("-123:7");
+      expect(calls).toBe(0);
+    } finally {
       harness.close();
     }
   } finally {

@@ -218,11 +218,11 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
 
 export type Hub = ReturnType<typeof createHub>;
 
-/** `transcribe` is injectable so tests can use a fake instead of loading
- * the Whisper model. */
+/** `transcribe` and `maxPcmBytes` are injectable so tests can use a fake
+ * instead of loading the Whisper model, and a small PCM cap. */
 export function createServer(
   hub = createHub(),
-  audioOpts?: { transcribe?: TranscribeFn },
+  audioOpts?: { transcribe?: TranscribeFn; maxPcmBytes?: number },
 ) {
   const app = express();
   app.use(express.json());
@@ -233,6 +233,7 @@ export function createServer(
   const audio = createAudioHandler({
     broadcast: (msg) => hub.broadcast(msg),
     transcribe: audioOpts?.transcribe,
+    maxPcmBytes: audioOpts?.maxPcmBytes,
   });
 
   const server = createHttpServer(app);
@@ -287,6 +288,9 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
       hub.broadcast({ type: "message", message });
     },
     onNewChat: () => {
+      hub.broadcast({ type: "chats-updated", chats: listKnownChats() });
+    },
+    onChatRemoved: () => {
       hub.broadcast({ type: "chats-updated", chats: listKnownChats() });
     },
     onError: (err) =>

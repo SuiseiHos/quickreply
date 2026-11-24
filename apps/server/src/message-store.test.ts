@@ -167,3 +167,14 @@ test("seedAllowedFromMessages grandfathers chats with stored messages", () => {
     { chat_id: -123, chat_title: "Ops", allowed: true },
   ]);
 });
+
+// Review F1: the seed is ONE-TIME. A chat the user toggled off must stay
+// off even when the server restarts (and re-runs the seed).
+test("seedAllowedFromMessages never re-allows a chat toggled off", () => {
+  saveMessage(FIXTURE);
+  expect(seedAllowedFromMessages()).toBe(1);
+  expect(isAllowedChat(-123)).toBe(true);
+  setChatAllowed(-123, false);
+  expect(seedAllowedFromMessages()).toBe(0);
+  expect(isAllowedChat(-123)).toBe(false);
+});

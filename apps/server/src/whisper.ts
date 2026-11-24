@@ -1,12 +1,11 @@
-// Whisper STT (Task 4) — local faster-whisper via a Python subprocess.
-// The plan names the OpenAI API, but no OpenAI key exists and creating
-// one needs a paid account (see the ledger ruling, Task 4). Same Whisper
-// model family, same transcribePcm() interface — swapping in the OpenAI
-// call later is a one-line change in this file.
-// The transcriber runs from the repo venv (apps/server/.venv) and reads
-// its model from HF_HOME (set in apps/server/.env); without HF_HOME it
-// falls back to faster-whisper's default cache and downloads the model.
+// Whisper STT (Task 5) — local faster-whisper via a Python subprocess.
+// No AI/LLM and no API key anywhere: DEEP-DIVE §2 specifies local
+// faster-whisper (small.en, int8), keyless and on-device. The transcriber
+// runs from the repo venv (apps/server/.venv) and reads its model from
+// HF_HOME; without HF_HOME it falls back to faster-whisper's default
+// cache and downloads the model.
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +26,18 @@ const TRANSCRIBE_PY = fileURLToPath(new URL("./transcribe.py", import.meta.url))
 // ever drops that copy, the transcriber fails with "can't open file".
 const VENV_PYTHON = fileURLToPath(new URL("../.venv/bin/python3", import.meta.url));
 const TRANSCRIBE_TIMEOUT_MS = 120000;
+
+/**
+ * Default model cache. On this VM the models already live in the shared
+ * cache, so use it when it exists; on a fresh checkout elsewhere, fall
+ * back to a repo-local cache (gitignored) and faster-whisper downloads
+ * small.en on first use (review F8). HF_HOME always wins when set.
+ */
+const SHARED_HF_CACHE = "/home/hatch/workspace/tmp/hf-cache";
+const LOCAL_HF_CACHE = fileURLToPath(new URL("../.hf-cache", import.meta.url));
+export function defaultHfHome(): string {
+  return existsSync(SHARED_HF_CACHE) ? SHARED_HF_CACHE : LOCAL_HF_CACHE;
+}
 
 /** Transcribe 16 kHz mono s16le PCM; returns the transcript text only. */
 export async function transcribePcm(pcm: Buffer): Promise<string> {
@@ -50,8 +61,7 @@ function runTranscriber(pcmPath: string): Promise<string> {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        HF_HOME:
-          process.env.HF_HOME ?? "/home/hatch/workspace/tmp/hf-cache",
+        HF_HOME: process.env.HF_HOME ?? defaultHfHome(),
       },
     });
     let out = "";

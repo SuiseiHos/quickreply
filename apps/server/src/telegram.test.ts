@@ -1,7 +1,8 @@
 import { beforeEach, test, expect } from "vitest";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseUpdate, getMe, startPoller } from "./telegram.js";
+import { parseUpdate, parseChatMemberUpdate, getMe, startPoller } from "./telegram.js";
 import {
   recordKnownChat,
   isAllowedChat,
@@ -86,12 +87,22 @@ test("parseUpdate ignores messages from other bots", () => {
   expect(parseUpdate(update)).toBeNull();
 });
 
-test("getMe returns the QuickReply bot (live, read-only)", async () => {
-  const me = await getMe();
-  expect(me.ok).toBe(true);
-  expect(me.result.username).toBe("quickreply_g2_bot");
-  expect(me.result.is_bot).toBe(true);
-}, 30000);
+// Live, read-only — and skipped when the helper is absent (review F8),
+// so `npm test` stays portable on a fresh checkout without the vaulted
+// Telegram connection.
+const HELPER_PATH =
+  process.env.TELEGRAM_HELPER_PATH ??
+  "/home/hatch/workspace/custom-connectors/custom.telegram/bin/telegram.py";
+test.skipIf(!existsSync(HELPER_PATH))(
+  "getMe returns the QuickReply bot (live, read-only)",
+  async () => {
+    const me = await getMe();
+    expect(me.ok).toBe(true);
+    expect(me.result.username).toBe("quickreply_g2_bot");
+    expect(me.result.is_bot).toBe(true);
+  },
+  30000,
+);
 
 // --- Task 8: poller allowlist gate + no remote control ---
 
@@ -170,4 +181,107 @@ test("poller forwards a chat once it becomes allowed", async () => {
   ]);
   expect(second.forwarded).toHaveLength(1);
   expect(listInbox()).toHaveLength(1);
+});
+
+// --- Review F10: bot removal from a chat ---
+
+test("parseChatMemberUpdate reports kicked/left, ignores the rest", () => {
+  const kicked = {
+    update_id: 3001,
+    my_chat_member: {
+      chat: { id: -123, title: "Ops", type: "group" },
+      new_chat_member: { status: "kicked" },
+    },
+  };
+  expect(parseChatMemberUpdate(kicked)).toEqual({
+    chat_id: -123,
+    chat_title: "Ops",
+    status: "kicked",
+  });
+  const left = {
+    update_id: 3002,
+    my_chat_member: {
+      chat: { id: -123, title: "Ops", type: "group" },
+      new_chat_member: { status: "left" },
+    },
+  };
+  expect(parseChatMemberUpdate(left)?.status).toBe("left");
+  const member = {
+    update_id: 3003,
+    my_chat_member: {
+      chat: { id: -123, title: "Ops", type: "group" },
+      new_chat_member: { status: "member" },
+    },
+  };
+  expect(parseChatMemberUpdate(member)).toBeNull();
+  expect(parseChatMemberUpdate(GROUP_UPDATE)).toBeNull();
+});
+
+test("poller removes an allowed chat when the bot is kicked", async () => {  recordKnownChat(-123, "Ops");
+  setChatAllowed(-123, true);
+  const removed: { chat_id: number; chat_title: string }[] = [];
+  let calls = 0;
+  const poller = startPoller({
+    onMessage: () => {},
+    onChatRemoved: (c) => removed.push(c),
+    fetchUpdates: async () => {
+      // The update is delivered once, like Telegram (the offset advances).
+      const batch =
+        calls === 0
+          ? [
+              {
+                update_id: 3011,
+                my_chat_member: {
+                  chat: { id: -123, title: "Ops", type: "group" },
+                  new_chat_member: { status: "kicked" },
+                },
+              },
+            ]
+          : [];
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      return batch;
+    },
+  });
+  await new Promise((r) => setTimeout(r, 120));
+  poller.stop();
+  await new Promise((r) => setTimeout(r, 30));
+  expect(isAllowedChat(-123)).toBe(false);
+  expect(removed).toEqual([{ chat_id: -123, chat_title: "Ops" }]);
+  expect(listInbox()).toHaveLength(0);
+});
+
+// --- TEST 2 "Halo" follow-up (24 Nov 22:18–22:22 WIB): the offset is
+// committed PER UPDATE, so a throw — or a restart — mid-batch cannot
+// leave an already-processed update unacknowledged. Telegram would then
+// re-deliver it, and a message dropped while its chat was pending could
+// be stored after the chat was approved.
+test("offset commits per update when a later update in the batch throws", async () => {
+  recordKnownChat(-123, "Ops");
+  setChatAllowed(-123, true);
+  const first = groupUpdate(4001, -123, "Ops", "first");
+  const second = groupUpdate(4002, -123, "Ops", "second");
+  let calls = 0;
+  const poller = startPoller({
+    onMessage: (m) => {
+      if (m.text === "second") throw new Error("broadcast blew up");
+    },
+    fetchUpdates: async () => {
+      const batch = calls === 0 ? [first, second] : [];
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      return batch;
+    },
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  poller.stop();
+  await new Promise((r) => setTimeout(r, 30));
+  // The first update was processed AND its offset committed before the
+  // second one threw, so it is never re-fetched. The second update's
+  // offset was NOT committed (its broadcast threw after the store), so it
+  // would be re-fetched next round — and saveMessage dedupes it by
+  // update_id, so it still lands exactly once.
+  expect(getOffset()).toBe(4002);
+  expect(listInbox()).toHaveLength(2);
+  expect(listInbox().map((m) => m.text).sort()).toEqual(["first", "second"]);
 });

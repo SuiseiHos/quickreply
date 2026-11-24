@@ -16,6 +16,15 @@ export type InboxMessage = {
 const LIST_LINE_MAX = 64;
 const INBOX_PAGE_SIZE = 5;
 
+/** A single display line, never longer than LIST_LINE_MAX (review F7:
+ * long chat titles used to push inbox/receipt/menu lines past 64 chars,
+ * and what the glasses do with an over-long line is unverified). */
+function oneLine(text: string): string {
+  return text.length > LIST_LINE_MAX
+    ? `${text.slice(0, LIST_LINE_MAX - 3)}...`
+    : text;
+}
+
 /** Word-wrap text to lines of at most `width` chars, at most `maxLines`
  * lines; a cut-off last line ends with "...". */
 export function wrapText(text: string, width: number, maxLines: number): string[] {
@@ -95,7 +104,9 @@ export function inboxScreen(
       firstLine(m.text).length > maxText && maxText > 3
         ? `${firstLine(m.text).slice(0, maxText - 3)}...`
         : firstLine(m.text);
-    lines.push(`${prefix}${text}`);
+    // The prefix itself can exceed 64 chars on a long title (the old
+    // maxText ≤ 3 fallback returned the full first line) — cap the row.
+    lines.push(oneLine(`${prefix}${text}`));
   });
   lines.push("", "Tap = Open   Swipe = Move", "Long-press = Home");
   return lines.join("\n");
@@ -105,7 +116,7 @@ export function inboxScreen(
 export function messageScreen(m: InboxMessage): string {
   const body = wrapText(`${m.sender_name}: ${m.text}`, LIST_LINE_MAX, 3);
   return [
-    m.chat_title,
+    oneLine(m.chat_title),
     "",
     ...body,
     "",
@@ -119,10 +130,10 @@ export function replyMenuScreen(
   replies: string[],
   selected: number,
 ): string {
-  const lines = [`Reply to ${chatTitle}:`, ""];
+  const lines = [oneLine(`Reply to ${chatTitle}:`), ""];
   replies.forEach((reply, i) => {
     const marker = i === selected ? ">" : " ";
-    lines.push(`${marker} ${reply}`);
+    lines.push(oneLine(`${marker} ${reply}`));
   });
   lines.push("", "Swipe = Pick   Tap = Send", "Long-press = Back");
   return lines.join("\n");
@@ -139,7 +150,7 @@ export function receiptScreen(
 ): string {
   const hh = String(sentAt.getHours()).padStart(2, "0");
   const mm = String(sentAt.getMinutes()).padStart(2, "0");
-  return [`Sent ${hh}:${mm}`, "", `${chatTitle}: ${replyText}`].join("\n");
+  return [`Sent ${hh}:${mm}`, "", oneLine(`${chatTitle}: ${replyText}`)].join("\n");
 }
 
 /** Error screen (Screen 8): the failure + how to recover. */
@@ -151,7 +162,7 @@ export function errorScreen(message: string): string {
  * No "●" glyph: the glasses font does not render "▸" or "✓" (verified
  * 24 Nov 2026), and "●" is the same class of glyph. Plain "REC" reads. */
 export function recordingScreen(chatTitle: string): string {
-  return ["REC", "", `To ${chatTitle}:`, "Speak now", "", "Tap = Stop"].join(
+  return ["REC", "", oneLine(`To ${chatTitle}:`), "Speak now", "", "Tap = Stop"].join(
     "\n",
   );
 }
@@ -161,7 +172,7 @@ export function recordingScreen(chatTitle: string): string {
 export function reviewScreen(chatTitle: string, transcript: string): string {
   const body = wrapText(transcript, LIST_LINE_MAX, 3);
   return [
-    `To ${chatTitle}:`,
+    oneLine(`To ${chatTitle}:`),
     "",
     ...body,
     "",

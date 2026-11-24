@@ -179,3 +179,22 @@ test("sendText re-send with the same key returns the stored receipt", async () =
   expect(calls).toHaveLength(1);
   expect(second).toEqual(first);
 });
+
+// Review F2: two CONCURRENT sends with the same key share one Telegram
+// call and return identical receipts (no double-send, no spurious error).
+test("concurrent sends with the same key share one Telegram call", async () => {
+  const { fn, calls } = makeFake();
+  const [first, second] = await Promise.all([
+    sendText(
+      { messageId: "-123:7", text: "Racing.", idempotencyKey: "race-1" },
+      fn,
+    ),
+    sendText(
+      { messageId: "-123:7", text: "Racing.", idempotencyKey: "race-1" },
+      fn,
+    ),
+  ]);
+  expect(calls).toHaveLength(1);
+  expect(second).toEqual(first);
+  expect(getSend("race-1")).not.toBeNull();
+});

@@ -241,12 +241,18 @@ export function listKnownChats(): KnownChat[] {
 /**
  * One-time grandfathering: every chat that already has stored messages
  * (i.e. chats the owner added the bot to before the allowlist existed)
- * becomes allowed. Idempotent — returns how many chats were newly allowed.
+ * becomes allowed. Runs ONCE — a `meta` flag records that it ran, so a
+ * chat the user later toggled off is never silently re-allowed by a
+ * server restart (review F1). Returns how many chats were newly allowed.
  * Chats first seen AFTER this runs are NOT grandfathered; they need an
  * explicit toggle.
  */
 export function seedAllowedFromMessages(): number {
   const database = getDb();
+  const flagged = database
+    .prepare("SELECT value FROM meta WHERE key = 'allowlist_seeded'")
+    .get() as { value: string } | undefined;
+  if (flagged) return 0;
   const chats = database
     .prepare("SELECT DISTINCT chat_id, chat_title FROM messages")
     .all() as { chat_id: number; chat_title: string }[];
@@ -260,6 +266,9 @@ export function seedAllowedFromMessages(): number {
       .run(c.chat_id, new Date().toISOString());
     newly += Number(result.changes);
   }
+  database
+    .prepare("INSERT INTO meta (key, value) VALUES ('allowlist_seeded', '1')")
+    .run();
   return newly;
 }
 
@@ -289,6 +298,12 @@ export function getSend(key: string): StoredSend | null {
 }
 
 /** Records a completed send under its idempotency key. */
+/**
+ * Records a send under its idempotency key. INSERT OR IGNORE: if two
+ * concurrent sends with the same key both passed getSend, only the first
+ * write wins and the second is a silent no-op (review F2) — the caller
+ * re-reads the stored receipt instead of surfacing a spurious failure.
+ */
 export function recordSend(
   key: string,
   messageId: number,
@@ -298,7 +313,7 @@ export function recordSend(
 ): void {
   getDb()
     .prepare(
-      `INSERT INTO send_keys
+      `INSERT OR IGNORE INTO send_keys
          (key, message_id, chat_id, text, result_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )

@@ -6,7 +6,8 @@
 // clients — the glasses apply them only when they are recording or
 // reviewing that same message (the clobber guard lives in main.ts).
 // {type:"transcript-text"} is the typed-transcript test seam: it skips
-// audio and sends text straight through the same broadcast.
+// audio and sends text straight through the same broadcast, and it only
+// works when QUICKREPLY_ALLOW_TRANSCRIPT_TEXT=1 (review F4).
 import type { WebSocket } from "ws";
 import { transcribePcm } from "./whisper.js";
 import { getMessage } from "./message-store.js";
@@ -25,23 +26,34 @@ export function maxAbsSample(pcm: Buffer): number {
   return peak;
 }
 
+/** PCM cap: 10 minutes of 16 kHz mono s16le (~19 MB). A recording past
+ * it is rejected as `too-long` without loading the model (review F5). */
+export const MAX_PCM_BYTES = 16000 * 2 * 600;
+
 export function createAudioHandler(opts: {
   broadcast: (msg: unknown) => void;
   transcribe?: TranscribeFn;
+  /** Test seam: a smaller cap so the rejection is reachable in a test. */
+  maxPcmBytes?: number;
 }) {
   const transcribe = opts.transcribe ?? transcribePcm;
-  const sessions = new Map<WebSocket, Buffer[]>();
+  const maxPcmBytes = opts.maxPcmBytes ?? MAX_PCM_BYTES;
+  const sessions = new Map<WebSocket, { chunks: Buffer[]; bytes: number }>();
 
-  /** A binary PCM frame from one connection. */
+  /** A binary PCM frame from one connection. Frames past the cap are
+   * dropped, so a stuck recording cannot grow memory without bound. */
   function onBinary(ws: WebSocket, data: Buffer): void {
-    const chunks = sessions.get(ws) ?? [];
-    chunks.push(data);
-    sessions.set(ws, chunks);
+    const session = sessions.get(ws) ?? { chunks: [], bytes: 0 };
+    if (session.bytes < maxPcmBytes) {
+      session.chunks.push(data);
+      session.bytes += data.length;
+    }
+    sessions.set(ws, session);
   }
 
   /** Discard the buffered PCM for one connection (user cancelled). */
   function onDiscard(ws: WebSocket): void {
-    sessions.set(ws, []);
+    sessions.set(ws, { chunks: [], bytes: 0 });
   }
 
   async function onAudioEnd(ws: WebSocket, messageId: string): Promise<void> {
@@ -50,12 +62,18 @@ export function createAudioHandler(opts: {
       ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
       return;
     }
-    const chunks = sessions.get(ws) ?? [];
-    sessions.set(ws, []);
-    const pcm = Buffer.concat(chunks);
+    const session = sessions.get(ws) ?? { chunks: [], bytes: 0 };
+    sessions.set(ws, { chunks: [], bytes: 0 });
+    const pcm = Buffer.concat(session.chunks);
     console.log(
       `[QuickReply] audio-end for ${messageId}: ${pcm.length} bytes`,
     );
+    // Over-cap recording (review F5): reject before the silence gate or
+    // the model ever sees it.
+    if (session.bytes >= maxPcmBytes) {
+      opts.broadcast({ type: "error", code: "too-long", messageId });
+      return;
+    }
     // Silence gate (Task 6): Whisper hallucinates on near-silence (it
     // transcribed 1 s of digital silence as "You" — FRICTION.md, T5).
     // Below this peak the audio carries no speech, so answer `empty`
@@ -130,6 +148,12 @@ export function createAudioHandler(opts: {
       return true;
     }
     if (type === "transcript-text") {
+      // Test seam (review F4): typed transcripts are accepted ONLY when
+      // the flag is set — never on a production server, where any local
+      // client could otherwise forge a transcript and bypass STT and the
+      // silence gate. When the flag is off, the message is not an audio
+      // message at all (the hub ignores it as an unknown type).
+      if (process.env.QUICKREPLY_ALLOW_TRANSCRIPT_TEXT !== "1") return false;
       const messageId = (msg as { messageId?: unknown }).messageId;
       const text = (msg as { text?: unknown }).text;
       if (typeof messageId !== "string" || typeof text !== "string") {

@@ -11,6 +11,7 @@ import {
   isAllowedChat,
   recordKnownChat,
   saveMessage,
+  setChatAllowed,
   setOffset,
   type IncomingMessage,
 } from "./message-store.js";
@@ -171,11 +172,44 @@ export function parseUpdate(update: unknown): IncomingMessage | null {
   };
 }
 
+export type ChatMemberEvent = {
+  chat_id: number;
+  chat_title: string;
+  status: "kicked" | "left";
+};
+
+/**
+ * Converts a `my_chat_member` update into a removal event, or null.
+ * Only kicked/left count: when a group admin removes the bot, the chat
+ * must stop being allowlisted (review F10). A "member" (re-added) update
+ * returns null — the chat stays as the panel left it, and the user can
+ * re-allow it there.
+ */
+export function parseChatMemberUpdate(update: unknown): ChatMemberEvent | null {
+  if (typeof update !== "object" || update === null) return null;
+  const u = update as { my_chat_member?: unknown };
+  const m = u.my_chat_member as
+    | { chat?: unknown; new_chat_member?: unknown }
+    | undefined;
+  if (!m || typeof m !== "object") return null;
+  const status = (m.new_chat_member as { status?: unknown } | undefined)?.status;
+  if (status !== "kicked" && status !== "left") return null;
+  const chat = m.chat as { id?: unknown; title?: unknown } | undefined;
+  if (!chat || typeof chat.id !== "number") return null;
+  return {
+    chat_id: chat.id,
+    chat_title: typeof chat.title === "string" ? chat.title : "Unknown chat",
+    status,
+  };
+}
+
 export type PollerOptions = {
   onMessage: (m: IncomingMessage) => void;
   /** Fires the first time a chat is seen (so the phone panel can show it
    * as pending approval). Fires for allowed chats too — once, on sighting. */
   onNewChat?: (chat: { chat_id: number; chat_title: string }) => void;
+  /** Fires when the bot is removed from a chat (kicked/left). */
+  onChatRemoved?: (chat: { chat_id: number; chat_title: string }) => void;
   onError?: (err: unknown) => void;
   /** Long-poll timeout per round in seconds (Telegram allows up to 50). */
   pollTimeoutSec?: number;
@@ -241,24 +275,26 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
       try {
         const offset = getOffset();
         const updates = await fetchRound(offset, pollTimeoutSec);
-        let maxId = offset;
         for (const update of updates) {
           const updateId = (update as { update_id?: unknown }).update_id;
-          if (typeof updateId === "number" && updateId > maxId) {
-            maxId = updateId;
-          }
-          const msg = parseUpdate(update);
-          if (!msg) continue;
-          // Every sighting is recorded (the phone panel shows pending
-          // chats); only allowlisted chats reach the inbox + glasses.
-          if (recordKnownChat(msg.chat_id, msg.chat_title)) {
-            opts.onNewChat?.({ chat_id: msg.chat_id, chat_title: msg.chat_title });
-          }
-          if (isAllowedChat(msg.chat_id) && saveMessage(msg)) {
-            opts.onMessage(msg);
+          if (typeof updateId === "number" && updateId > offset) {
+            // Commit the offset PER UPDATE, right after that update is
+            // processed (review follow-up, TEST 2 "Halo" case, 24 Nov
+            // 22:18–22:22 WIB): the old code set the offset once at the
+            // end of the batch, so a throw — or a restart — mid-batch left
+            // the whole batch unacknowledged. Telegram then re-delivered
+            // it, and a message dropped while its chat was pending could
+            // be stored after the chat was approved. Per-update commits
+            // shrink that window to the milliseconds of one update; a
+            // re-fetch can still duplicate an ALLOWED message, but
+            // saveMessage dedupes by update_id, so nothing is lost and
+            // nothing is delivered twice.
+            processUpdate(update);
+            setOffset(updateId + 1);
+          } else {
+            processUpdate(update);
           }
         }
-        if (maxId > offset) setOffset(maxId + 1);
       } catch (err) {
         if (stopped) return;
         opts.onError?.(err);
@@ -268,6 +304,29 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
         );
         await sleep(5000);
       }
+    }
+  }
+
+  function processUpdate(update: unknown): void {
+    // Bot removed from a chat (review F10): stop allowlisting it.
+    // History stays in the inbox; a reply attempt fails cleanly
+    // at Telegram with send-failed.
+    const removed = parseChatMemberUpdate(update);
+    if (removed) {
+      recordKnownChat(removed.chat_id, removed.chat_title);
+      setChatAllowed(removed.chat_id, false);
+      opts.onChatRemoved?.({ chat_id: removed.chat_id, chat_title: removed.chat_title });
+      return;
+    }
+    const msg = parseUpdate(update);
+    if (!msg) return;
+    // Every sighting is recorded (the phone panel shows pending
+    // chats); only allowlisted chats reach the inbox + glasses.
+    if (recordKnownChat(msg.chat_id, msg.chat_title)) {
+      opts.onNewChat?.({ chat_id: msg.chat_id, chat_title: msg.chat_title });
+    }
+    if (isAllowedChat(msg.chat_id) && saveMessage(msg)) {
+      opts.onMessage(msg);
     }
   }
 

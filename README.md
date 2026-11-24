@@ -1,6 +1,6 @@
 # QuickReply
 
-**Reply to Telegram from your Even G2 glasses. Two taps for a canned reply — or speak one, and the glasses send exactly what you said. No AI in the loop.**
+**Reply to Telegram from your Even G2 glasses. Three taps from the inbox — or speak one, and the glasses send exactly what you said. No AI in the loop.**
 
 ![QuickReply demo — the eight glasses screens](demo.gif)
 
@@ -10,7 +10,7 @@ Built for the [Even Realities hackathon](https://dorahacks.io/hackathon/even-rea
 
 ## What it does
 
-- **C2 — canned replies.** Five replies you edit from the phone panel. Two taps from the inbox to a sent message, with a `Sent HH:MM` receipt.
+- **C2 — canned replies.** Five replies you edit from the phone panel. Three taps from the inbox to a sent message (open → pick → send), with a `Sent HH:MM` receipt.
 - **C1 — voice replies.** Speak on the glasses mic; local faster-whisper (small.en) transcribes on the backend; the glasses show the transcript for review (`To <chat>:` + text) before anything is sent. Tap sends, swipe up edits on the phone, swipe down discards.
 - **A real write, not a read-only demo.** Every send is a real `sendMessage` to a real Telegram group, delivered through the Telegram Bot API. The demo sent 9 real messages (see [CLAIMS.md](CLAIMS.md)).
 - **A gate, not a guess.** Every send passes the same server-enforced gate: non-empty after trim (G1), at most 4096 characters — never silently truncated (G2), to a chat the bot has actually seen (G3), once per idempotency key — a double-tap returns the stored receipt and sends nothing twice (G4), and the review always shows `To <chat>:` so you never reply to the wrong chat (G5).
@@ -71,7 +71,7 @@ cd apps/g2 && npm run dev   # serves the app; load it in the Even Hub simulator
 - **English voice only.** Voice replies transcribe with `small.en`. The canned replies work in any language.
 - **Whisper hallucinates on silence.** One second of digital silence transcribed as "You". A silence gate (peak sample < 50) answers `empty` without loading the model, but quiet real speech near the threshold is untested.
 - **Send-failed retry and over-long transcripts are unit-tested only.** There is no live trigger for a failed Telegram send without breaking the real call, and a live >4096-character transcript needs ~10 minutes of speech.
-- **Chat allowlist (default-deny).** Only chats you approve in the phone panel reach the glasses. A new chat the bot is added to shows as pending — its messages are dropped, not stored — until you check it. Chats the bot already served before the allowlist existed were grandfathered in.
+- **Chat allowlist (default-deny).** Only chats you approve in the phone panel reach the glasses. A new chat the bot is added to shows as pending — its messages don't reach the glasses — until you check it. (A message sent while pending is normally skipped and never stored; if the server restarts before the poller acknowledges it, Telegram may redeliver it and it can arrive after you approve the chat — see `track01/FRICTION.md`, TEST 2 case. Nothing is ever delivered twice.) Chats the bot already served before the allowlist existed were grandfathered in.
 - **No remote control.** The bot has no Telegram commands: message text is never executed, and nobody can make the bot do anything from Telegram — the only state-changing inputs are the glasses and the phone panel, over a local WebSocket. The server binds `127.0.0.1` only. (Group admins can still remove or restrict the bot; that is Telegram-side and cannot be prevented in code.)
 - **One bot, all chats — now gated.** The inbox shows only allowlisted chats (see above).
 

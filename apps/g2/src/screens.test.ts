@@ -211,3 +211,32 @@ test("editHintScreen points at the phone panel", () => {
     ].join("\n"),
   );
 });
+
+// Review F7: no line may exceed 64 chars, even with a 60-char chat title
+// and a 64-char canned reply (the old inbox fallback returned the full
+// first line, and the menu/receipt rendered the title untruncated).
+test("no screen line exceeds 64 chars with a long chat title", () => {
+  const longTitle = "A".repeat(60);
+  const longMessage = {
+    id: "-123:7",
+    chat_id: -123,
+    chat_title: longTitle,
+    sender_name: "Ani",
+    text: "B".repeat(200),
+    created_at: "2026-11-24T13:00:00.000Z",
+    read: 0,
+  };
+  const screens = [
+    inboxScreen([longMessage], 0, 0),
+    messageScreen(longMessage),
+    replyMenuScreen(longTitle, ["C".repeat(64), "Yes", "No", "On my way", "Noted"], 0),
+    receiptScreen(longTitle, "D".repeat(64), new Date(2026, 10, 24, 20, 14)),
+    recordingScreen(longTitle),
+    reviewScreen(longTitle, "E".repeat(200)),
+  ];
+  for (const screen of screens) {
+    for (const line of screen.split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(64);
+    }
+  }
+});
