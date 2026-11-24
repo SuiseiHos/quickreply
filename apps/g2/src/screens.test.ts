@@ -3,6 +3,8 @@ import {
   homeScreen,
   inboxScreen,
   messageScreen,
+  messageBodyLines,
+  messagePageCount,
   replyMenuScreen,
   receiptScreen,
   sendingScreen,
@@ -115,13 +117,53 @@ test("messageScreen shows sender and wrapped text", () => {
   );
 });
 
-test("messageScreen wraps long text to 3 lines with an ellipsis", () => {
-  const long = { ...INBOX_MSG, text: "word ".repeat(40).trim() };
-  const screen = messageScreen(long);
-  const lines = screen.split("\n");
-  expect(lines.length).toBeLessThanOrEqual(7);
-  expect(lines.some((l) => l.length > 64)).toBe(false);
-  expect(lines.join("\n")).toContain("...");
+test("messageScreen paginates a long message instead of cutting it", () => {
+  // Eight ~57-char sentences with words unique to each sentence, so no
+  // wrapped line is a substring of another. The greedy wrap packs them
+  // into 8+ lines, i.e. 3 pages of 3 lines. Every wrapped line must
+  // appear on exactly one page, and the footer must say where to swipe.
+  const sentences = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"].map(
+    (tag, i) =>
+      `${tag} ` +
+      Array.from({ length: 11 }, (_, j) => `w${i + 1}${"abcdefghijk"[j]}${"abcdefghijk"[j]}`).join(" "),
+  );
+  const long = { ...INBOX_MSG, text: sentences.join(" ") };
+  const lines = messageBodyLines(long);
+  expect(lines.length).toBeGreaterThan(3);
+  const pageCount = messagePageCount(long);
+  expect(pageCount).toBe(Math.ceil(lines.length / 3));
+  expect(pageCount).toBeGreaterThanOrEqual(2);
+
+  for (let p = 0; p < pageCount; p++) {
+    const screen = messageScreen(long, p);
+    const shown = lines.slice(p * 3, p * 3 + 3);
+    const hidden = lines.filter((l) => !shown.includes(l));
+    for (const l of shown) expect(screen).toContain(l);
+    for (const l of hidden) expect(screen).not.toContain(l);
+    for (const line of screen.split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(64);
+    }
+    if (p === 0) {
+      expect(screen).toContain(`Swipe down = More (1/${pageCount})`);
+    } else if (p === pageCount - 1) {
+      expect(screen).toContain("Swipe up = Back");
+      expect(screen).toContain(`Swipe down = Inbox (${pageCount}/${pageCount})`);
+    } else {
+      expect(screen).toContain("Swipe up = Back");
+      expect(screen).toContain(`Swipe down = More (${p + 1}/${pageCount})`);
+    }
+  }
+
+  expect(messageScreen(long, 0)).toContain("S1");
+  expect(messageScreen(long, pageCount - 1)).toContain("S8");
+  expect(messageScreen(long, 0)).not.toContain("S8");
+  expect(messageScreen(long, pageCount - 1)).not.toContain("S1");
+});
+
+test("messageScreen clamps an out-of-range page and counts one page for short text", () => {
+  expect(messagePageCount(INBOX_MSG)).toBe(1);
+  expect(messageScreen(INBOX_MSG, 5)).toBe(messageScreen(INBOX_MSG, 0));
+  expect(messageScreen(INBOX_MSG, -1)).toBe(messageScreen(INBOX_MSG, 0));
 });
 
 test("replyMenuScreen marks the selected reply with '> '", () => {

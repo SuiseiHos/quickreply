@@ -15,6 +15,20 @@ export type InboxMessage = {
 
 const LIST_LINE_MAX = 64;
 const INBOX_PAGE_SIZE = 5;
+const MESSAGE_PAGE_LINES = 3;
+
+/** All wrapped body lines of a message, without a page cap. */
+export function messageBodyLines(m: InboxMessage): string[] {
+  return wrapText(`${m.sender_name}: ${m.text}`, LIST_LINE_MAX, 99);
+}
+
+/** How many 3-line pages the message body needs (at least 1). */
+export function messagePageCount(m: InboxMessage): number {
+  return Math.max(
+    1,
+    Math.ceil(messageBodyLines(m).length / MESSAGE_PAGE_LINES),
+  );
+}
 
 /** A single display line, never longer than LIST_LINE_MAX.
  * Long chat titles used to push inbox/receipt/menu lines past 64 chars,
@@ -112,16 +126,36 @@ export function inboxScreen(
   return lines.join("\n");
 }
 
-/** Message screen (Screen 3): sender + wrapped text + action footer. */
-export function messageScreen(m: InboxMessage): string {
-  const body = wrapText(`${m.sender_name}: ${m.text}`, LIST_LINE_MAX, 3);
-  return [
-    oneLine(m.chat_title),
-    "",
-    ...body,
-    "",
-    "Tap = Reply   Swipe up = Voice",
-  ].join("\n");
+/** Message screen (Screen 3): sender + wrapped text + action footer.
+ * A long message is paged 3 lines at a time — swipe down reads on,
+ * swipe up goes back a page (voice starts from the first page only).
+ * The footer always says which gesture does what. */
+export function messageScreen(m: InboxMessage, page = 0): string {
+  const lines = messageBodyLines(m);
+  const pageCount = messagePageCount(m);
+  const current = Math.min(Math.max(page, 0), pageCount - 1);
+  const body = lines.slice(
+    current * MESSAGE_PAGE_LINES,
+    (current + 1) * MESSAGE_PAGE_LINES,
+  );
+  const footer =
+    pageCount === 1
+      ? ["Tap = Reply   Swipe up = Voice"]
+      : current === 0
+        ? [
+            "Tap = Reply   Swipe up = Voice",
+            `Swipe down = More (${current + 1}/${pageCount})`,
+          ]
+        : current === pageCount - 1
+          ? [
+              "Tap = Reply   Swipe up = Back",
+              `Swipe down = Inbox (${current + 1}/${pageCount})`,
+            ]
+          : [
+              "Tap = Reply   Swipe up = Back",
+              `Swipe down = More (${current + 1}/${pageCount})`,
+            ];
+  return [oneLine(m.chat_title), "", ...body, "", ...footer].join("\n");
 }
 
 /** Reply menu (Screen 4): the 5 canned replies, `"> "` on the selected one. */

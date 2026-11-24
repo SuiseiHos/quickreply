@@ -17,6 +17,7 @@ import {
   homeScreen,
   inboxScreen,
   messageScreen,
+  messagePageCount,
   receiptScreen,
   recordingScreen,
   replyMenuScreen,
@@ -77,6 +78,8 @@ let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
 let inboxPageStart = 0;
 let currentMessage: InboxMessage | null = null;
+/** Which 3-line page of the current message is on screen (0-based). */
+let messagePage = 0;
 let menuSelected = 0;
 let receiptTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSend:
@@ -116,7 +119,7 @@ function currentScreenText(): string {
       return inboxScreen(messages, inboxSelected, inboxPageStart);
     case "message":
       return currentMessage
-        ? messageScreen(currentMessage)
+        ? messageScreen(currentMessage, messagePage)
         : homeScreen(unreadCount);
     case "menu":
       return currentMessage
@@ -208,6 +211,7 @@ function goInbox(): void {
 function openMessage(m: InboxMessage): void {
   clearReceiptTimer();
   currentMessage = m;
+  messagePage = 0;
   screen = "message";
   sendToServer({ type: "open-message", messageId: m.id });
   render();
@@ -383,7 +387,14 @@ function handleSwipeUp(): void {
       cycleMenuSelection(-1);
       break;
     case "message":
-      startRecording();
+      // First page: swipe up starts a voice reply (as before). On a
+      // later page it goes back one page instead.
+      if (messagePage > 0) {
+        messagePage--;
+        render();
+      } else {
+        startRecording();
+      }
       break;
     case "review":
       // Edit: the transcript is edited on the phone panel.
@@ -404,7 +415,17 @@ function handleSwipeDown(): void {
       cycleMenuSelection(1);
       break;
     case "message":
-      goInbox();
+      // Swipe down reads the next page while one is left; on the last
+      // page it goes back to the inbox (as before).
+      if (
+        currentMessage &&
+        messagePage < messagePageCount(currentMessage) - 1
+      ) {
+        messagePage++;
+        render();
+      } else {
+        goInbox();
+      }
       break;
     case "recording":
       cancelRecording();

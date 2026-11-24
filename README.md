@@ -13,6 +13,8 @@ Built for the [Even Realities hackathon](https://dorahacks.io/hackathon/even-rea
 - **C2 — canned replies.** Five replies you edit from the phone panel. Three taps from the inbox to a sent message (open → pick → send), with a `Sent HH:MM` receipt.
 - **C1 — voice replies.** Speak on the glasses mic; local faster-whisper (small.en) transcribes on the backend; the glasses show the transcript for review (`To <chat>:` + text) before anything is sent. Tap sends, swipe up edits on the phone, swipe down discards.
 - **A real write, not a read-only demo.** Every send is a real `sendMessage` to a real Telegram group, delivered through the Telegram Bot API. The demo sent 9 real messages to real Telegram chats.
+
+- **Long messages page.** A message longer than 3 lines pages on the glasses — swipe down to read on, swipe up to go back; the footer always says which gesture does what.
 - **A gate, not a guess.** Every send passes the same server-enforced gate: non-empty after trim (G1), at most 4096 characters — never silently truncated (G2), to a chat the bot has actually seen (G3), once per idempotency key — a double-tap returns the stored receipt and sends nothing twice (G4), and the review always shows `To <chat>:` so you never reply to the wrong chat (G5).
 - **Failure is a screen, not a crash.** Empty audio → `Nothing heard — try again`. Transcription failure → `Couldn't hear that. Tap to try again.` A transcript for another message never clobbers the screen you are on (regression-tested live). The server restarts mid-demo and the glasses reconnect on their own.
 
