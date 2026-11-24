@@ -535,7 +535,7 @@ function handleServerMessage(raw: string): void {
     }
     render();
   } else if (type === "transcript") {
-    // THE clobber guard (the CallIt bug, 24 Nov 2026): a transcript
+    // THE clobber guard: a transcript
     // applies ONLY when this screen is recording, reviewing or
     // transcribing for THAT SAME message — never on the receipt, the
     // menu, another message's review, or after a discard. An edited
@@ -577,7 +577,7 @@ function handleServerMessage(raw: string): void {
     render();
   } else if (type === "receipt") {
     // A receipt only answers a send in flight: never let a late receipt
-    // clobber another screen (the CallIt transcript-clobber class).
+    // clobber another screen (same class of bug as a stray transcript).
     if (screen !== "sending" && screen !== "error") return;
     const r = msg as ReceiptMessage;
     lastSend = null;
@@ -707,8 +707,8 @@ export async function initBridge(): Promise<void> {
     // second startup page as `invalid` (1). The event handler lives on the
     // bridge, not the container, so keep going instead of aborting: taps
     // still reach this handler and textContainerUpgrade still updates the
-    // live container. (Observed 24 Nov 2026 in CallIt: the reload's init
-    // threw here and every tap after it was silently ignored.)
+    // live container. (Observed on a reload: the init threw here and
+    // every tap after it was silently ignored.)
     console.warn(
       "[QuickReply] createStartUpPageContainer returned",
       result,
@@ -732,8 +732,8 @@ export async function initBridge(): Promise<void> {
     // A sysEvent is trusted when it carries either field: a tap arrives
     // as sysEvent {eventSource: 1} with NO eventType (→ undefined = tap),
     // while a long-press arrives as sysEvent {eventType: 9} with NO
-    // eventSource. Requiring eventSource (the CallIt shape) silently
-    // drops long-presses. (Diagnosed 24 Nov 2026 from /api/console.)
+    // eventSource. Requiring eventSource (as an earlier version did)
+    // silently drops long-presses. (Diagnosed from /api/console.)
     let eventType: OsEventTypeList | undefined;
     const sys = event.sysEvent;
     if (sys && (sys.eventSource !== undefined || sys.eventType !== undefined)) {

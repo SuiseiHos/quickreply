@@ -1,7 +1,7 @@
 // WS audio handler tests: PCM frames → transcript broadcast,
 // with the transcriber faked (the real one is covered by whisper.test.ts).
 // Two sockets: the harness (sends audio) and the glasses (receives the
-// broadcast transcript) — the CallIt split-socket shape.
+// broadcast transcript) — audio and glasses on separate sockets.
 import { beforeEach, test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
