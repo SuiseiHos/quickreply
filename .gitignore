@@ -1,0 +1,6 @@
+.env
+*.db
+*.ehpk
+dist/
+node_modules/
+.superpowers/
