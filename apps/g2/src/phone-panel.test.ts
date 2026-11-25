@@ -25,6 +25,7 @@ function callbacks(): ReplyPanelCallbacks & {
   onToggleChat: ReturnType<typeof vi.fn>;
   onToggleVip: ReturnType<typeof vi.fn>;
   onSaveKeywords: ReturnType<typeof vi.fn>;
+  onSaveQuietHours: ReturnType<typeof vi.fn>;
 } {
   return {
     onSave: vi.fn(),
@@ -32,6 +33,7 @@ function callbacks(): ReplyPanelCallbacks & {
     onToggleChat: vi.fn(),
     onToggleVip: vi.fn(),
     onSaveKeywords: vi.fn(),
+    onSaveQuietHours: vi.fn(),
   };
 }
 
@@ -121,6 +123,30 @@ describe("renderReplyPanel", () => {
     ) as HTMLButtonElement;
     saveBtn.click();
     expect(cb.onSaveKeywords).toHaveBeenCalledWith("down, failed");
+  });
+
+  it("renders quiet-hours inputs and saves the window, empty means off", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, {
+      senders: SENDERS,
+      quietHours: { start: "22:00", end: "07:00" },
+    });
+    const start = document.querySelector("#qr-quiet-start") as HTMLInputElement;
+    const end = document.querySelector("#qr-quiet-end") as HTMLInputElement;
+    expect(start.value).toBe("22:00");
+    expect(end.value).toBe("07:00");
+    start.value = "23:00";
+    end.value = "06:00";
+    const saveBtn = [...document.querySelectorAll(".qr-btn")].find(
+      (b) => b.textContent === "Save quiet hours",
+    ) as HTMLButtonElement;
+    saveBtn.click();
+    expect(cb.onSaveQuietHours).toHaveBeenCalledWith("23:00", "06:00");
+
+    start.value = "";
+    end.value = "";
+    saveBtn.click();
+    expect(cb.onSaveQuietHours).toHaveBeenCalledWith(null, null);
   });
 
   it("saves trimmed replies and rejects an empty slot without calling onSave", () => {

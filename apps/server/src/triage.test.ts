@@ -2,7 +2,7 @@
 // Pure function over stored messages — no I/O, so it is tested here and
 // shared by listInbox (the store) instead of living in SQL.
 import { test, expect } from "vitest";
-import { rankInbox, isUrgent } from "./triage.js";
+import { rankInbox, isUrgent, isQuietHour, shouldPush } from "./triage.js";
 import type { StoredMessage } from "./message-store.js";
 
 function msg(over: Partial<StoredMessage> & { id: string }): StoredMessage {
@@ -103,4 +103,47 @@ test("rankInbox still puts VIP ahead of urgent", () => {
   expect(
     rankInbox([urgent, vip], [555], ["down"]).map((m) => m.id),
   ).toEqual(["b", "a"]);
+});
+
+function at(hour: number, minute: number): Date {
+  // Local time: the server's quiet hours run on server-local time (WIB).
+  return new Date(2026, 10, 25, hour, minute);
+}
+
+test("isQuietHour covers an overnight window, start inclusive, end exclusive", () => {
+  expect(isQuietHour(at(22, 0), "22:00", "07:00")).toBe(true);
+  expect(isQuietHour(at(23, 30), "22:00", "07:00")).toBe(true);
+  expect(isQuietHour(at(6, 59), "22:00", "07:00")).toBe(true);
+  expect(isQuietHour(at(7, 0), "22:00", "07:00")).toBe(false);
+  expect(isQuietHour(at(21, 59), "22:00", "07:00")).toBe(false);
+  expect(isQuietHour(at(12, 0), "22:00", "07:00")).toBe(false);
+});
+
+test("isQuietHour covers a daytime window, boundaries on both sides", () => {
+  expect(isQuietHour(at(9, 0), "09:00", "17:00")).toBe(true);
+  expect(isQuietHour(at(12, 0), "09:00", "17:00")).toBe(true);
+  expect(isQuietHour(at(16, 59), "09:00", "17:00")).toBe(true);
+  expect(isQuietHour(at(17, 0), "09:00", "17:00")).toBe(false);
+  expect(isQuietHour(at(8, 59), "09:00", "17:00")).toBe(false);
+});
+
+test("isQuietHour is off when either bound is null", () => {
+  expect(isQuietHour(at(23, 0), null, "07:00")).toBe(false);
+  expect(isQuietHour(at(23, 0), "22:00", null)).toBe(false);
+  expect(isQuietHour(at(23, 0), null, null)).toBe(false);
+});
+
+test("shouldPush holds a normal message during quiet hours", () => {
+  const m = msg({ id: "a", sender_id: 777, text: "hi" });
+  expect(shouldPush(m, [], ["down"], { start: "22:00", end: "07:00" }, at(23, 0))).toBe(false);
+  expect(shouldPush(m, [], ["down"], { start: "22:00", end: "07:00" }, at(12, 0))).toBe(true);
+  expect(shouldPush(m, [], ["down"], null, at(23, 0))).toBe(true);
+});
+
+test("shouldPush lets VIP and urgent messages through quiet hours", () => {
+  const vip = msg({ id: "a", sender_id: 555, text: "hi" });
+  const urgent = msg({ id: "b", sender_id: 777, text: "server is down" });
+  const q = { start: "22:00", end: "07:00" };
+  expect(shouldPush(vip, [555], ["down"], q, at(23, 0))).toBe(true);
+  expect(shouldPush(urgent, [], ["down"], q, at(23, 0))).toBe(true);
 });

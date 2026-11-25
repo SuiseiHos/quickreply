@@ -80,6 +80,8 @@ let senders: PanelSender[] = [];
 let vips: number[] = [];
 let keywords: string[] = [];
 let keywordsSavePending = false;
+let quietHours: { start: string; end: string } | null = null;
+let quietHoursSavePending = false;
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -188,13 +190,18 @@ function render(): void {
       setPanelStatus("Saving...");
       sendToServer({ type: "set-keywords", keywords: text });
     },
+    onSaveQuietHours: (start, end) => {
+      quietHoursSavePending = true;
+      setPanelStatus("Saving...");
+      sendToServer({ type: "set-quiet-hours", start, end });
+    },
   },
   // The phone panel shows the voice-reply editor only while a review
   // is active (or its too-long error is showing).
   (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
     ? { messageId: voiceMessage.id, text: reviewTranscript }
     : null,
-  { senders, keywords },
+  { senders, keywords, quietHours },
   );
 }
 
@@ -599,7 +606,7 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown; quietHours?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
@@ -618,9 +625,34 @@ function handleServerMessage(raw: string): void {
     if (Array.isArray(payload.keywords)) {
       keywords = payload.keywords as string[];
     }
+    if (
+      payload.quietHours === null ||
+      (typeof payload.quietHours === "object" &&
+        payload.quietHours !== null &&
+        typeof (payload.quietHours as { start?: unknown }).start === "string" &&
+        typeof (payload.quietHours as { end?: unknown }).end === "string")
+    ) {
+      quietHours = payload.quietHours as { start: string; end: string } | null;
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
+    render();
+  } else if (type === "quiet-hours-updated") {
+    const next = (msg as { quietHours?: unknown }).quietHours;
+    if (
+      next === null ||
+      (typeof next === "object" &&
+        next !== null &&
+        typeof (next as { start?: unknown }).start === "string" &&
+        typeof (next as { end?: unknown }).end === "string")
+    ) {
+      quietHours = next as { start: string; end: string } | null;
+    }
+    if (quietHoursSavePending) {
+      setPanelStatus("Saved", "ok");
+      quietHoursSavePending = false;
+    }
     render();
   } else if (type === "keywords-updated") {
     const next = (msg as { keywords?: unknown }).keywords;
@@ -734,6 +766,13 @@ function handleServerMessage(raw: string): void {
       if (keywordsSavePending) {
         setPanelStatus("Too many keywords, or one is too long.", "error");
         keywordsSavePending = false;
+      }
+      return;
+    }
+    if (code === "bad-quiet-hours") {
+      if (quietHoursSavePending) {
+        setPanelStatus("Quiet hours need two valid times, or both empty.", "error");
+        quietHoursSavePending = false;
       }
       return;
     }

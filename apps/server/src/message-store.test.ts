@@ -14,6 +14,8 @@ import {
   listVips,
   getKeywords,
   setKeywords,
+  getQuietHours,
+  setQuietHours,
   getOffset,
   setOffset,
   recordKnownChat,
@@ -87,6 +89,30 @@ test("setKeywords rejects more than 20 keywords or one over 32 chars", () => {
 test("setKeywords with an empty string disables urgency matching", () => {
   expect(setKeywords("   ")).toBe(true);
   expect(getKeywords()).toEqual([]);
+});
+
+test("getQuietHours is null by default", () => {
+  expect(getQuietHours()).toBeNull();
+});
+
+test("setQuietHours round-trips an overnight window", () => {
+  expect(setQuietHours("22:00", "07:00")).toBe(true);
+  expect(getQuietHours()).toEqual({ start: "22:00", end: "07:00" });
+});
+
+test("setQuietHours with both null disables quiet hours", () => {
+  setQuietHours("22:00", "07:00");
+  expect(setQuietHours(null, null)).toBe(true);
+  expect(getQuietHours()).toBeNull();
+});
+
+test("setQuietHours rejects bad times and half-set windows", () => {
+  expect(setQuietHours("25:00", "07:00")).toBe(false);
+  expect(setQuietHours("22:60", "07:00")).toBe(false);
+  expect(setQuietHours("9:00", "07:00")).toBe(false);
+  expect(setQuietHours("22:00", null)).toBe(false);
+  expect(setQuietHours(null, "07:00")).toBe(false);
+  expect(getQuietHours()).toBeNull();
 });
 
 test("setVip on an unknown sender returns false and changes nothing", () => {

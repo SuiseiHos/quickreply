@@ -2,12 +2,15 @@ import { beforeEach, test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import { createServer, createHub } from "./index.js";
+import { createServer, createHub, shouldPushToGlasses } from "./index.js";
 import {
   saveMessage,
   listInbox,
   listVips,
   getKeywords,
+  getQuietHours,
+  setQuietHours,
+  setVip,
   recordKnownChat,
   isAllowedChat,
   setChatAllowed,
@@ -563,6 +566,67 @@ test("WS set-vip with a malformed payload is ignored, no crash", async () => {
       const msg = await reply;
       expect(msg.type).toBe("inbox");
       expect(listVips()).toEqual([]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("shouldPushToGlasses reads live store state for the gate", async () => {
+  // A window covering right now, computed from the clock.
+  const now = new Date();
+  const fmt = (d: Date): string =>
+    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const start = fmt(new Date(now.getTime() - 60 * 60 * 1000));
+  const end = fmt(new Date(now.getTime() + 60 * 60 * 1000));
+  expect(setQuietHours(start, end)).toBe(true);
+  const normal = { ...FIXTURE, sender_id: 777, text: "hi" };
+  expect(shouldPushToGlasses(normal, now)).toBe(false);
+  const urgent = { ...FIXTURE, sender_id: 777, text: "server is down" };
+  expect(shouldPushToGlasses(urgent, now)).toBe(true);
+  saveMessage(FIXTURE);
+  setVip(555, true);
+  expect(shouldPushToGlasses(FIXTURE, now)).toBe(true);
+  expect(setQuietHours(null, null)).toBe(true);
+  expect(shouldPushToGlasses(normal, now)).toBe(true);
+});
+
+test("WS set-quiet-hours updates the window and broadcasts quiet-hours-updated", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(
+        JSON.stringify({ type: "set-quiet-hours", start: "22:00", end: "07:00" }),
+      );
+      const msg = await pushed;
+      expect(msg.type).toBe("quiet-hours-updated");
+      expect(msg.quietHours).toEqual({ start: "22:00", end: "07:00" });
+      expect(getQuietHours()).toEqual({ start: "22:00", end: "07:00" });
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-quiet-hours with a bad window replies bad-quiet-hours", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({ type: "set-quiet-hours", start: "25:00", end: "07:00" }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-quiet-hours");
+      expect(getQuietHours()).toBeNull();
     } finally {
       ws.close();
     }

@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rankInbox } from "./triage.js";
+import type { QuietHours } from "./triage.js";
 
 export type IncomingMessage = {
   id: string;
@@ -439,6 +440,48 @@ export function setKeywords(csv: string): boolean {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     )
     .run(keywords.join(","));
+  return true;
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function readSetting(key: string): string | null {
+  const row = getDb()
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(key) as { value: string } | undefined;
+  return row ? row.value : null;
+}
+
+function writeSetting(key: string, value: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(key, value);
+}
+
+/** Quiet hours. Null means off. Both bounds must be valid HH:MM or
+ * both null — a half-set window is rejected and stores nothing. */
+export function getQuietHours(): QuietHours {
+  const raw = readSetting("quiet_hours");
+  if (raw === null) return null;
+  const [start, end] = raw.split("|");
+  if (!start || !end || !HHMM.test(start) || !HHMM.test(end)) return null;
+  return { start, end };
+}
+
+export function setQuietHours(
+  start: string | null,
+  end: string | null,
+): boolean {
+  if (start === null && end === null) {
+    getDb().prepare("DELETE FROM settings WHERE key = 'quiet_hours'").run();
+    return true;
+  }
+  if (start === null || end === null) return false;
+  if (!HHMM.test(start) || !HHMM.test(end)) return false;
+  writeSetting("quiet_hours", `${start}|${end}`);
   return true;
 }
 

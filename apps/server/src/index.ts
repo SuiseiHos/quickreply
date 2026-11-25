@@ -9,6 +9,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import {
   getKeywords,
   getMessage,
+  getQuietHours,
   getReplies,
   listInbox,
   listKnownChats,
@@ -18,10 +19,12 @@ import {
   seedAllowedFromMessages,
   setChatAllowed,
   setKeywords,
+  setQuietHours,
   setReplies,
   setVip,
+  type IncomingMessage,
 } from "./message-store.js";
-import { isUrgent } from "./triage.js";
+import { isUrgent, shouldPush } from "./triage.js";
 import { sendCanned, sendText, type SendResult } from "./send.js";
 import { createAudioHandler, type TranscribeFn } from "./ws-audio.js";
 import {
@@ -143,8 +146,22 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
           })),
           vips,
           keywords,
+          quietHours: getQuietHours(),
         }),
       );
+    } else if (type === "set-quiet-hours") {
+      // Phone-panel quiet-hours editor: HH:MM start and end, or both
+      // empty to turn quiet hours off. A bad window is rejected and
+      // stores nothing — the panel shows the error.
+      const start = (msg as { start?: unknown }).start;
+      const end = (msg as { end?: unknown }).end;
+      if (start !== null && typeof start !== "string") return;
+      if (end !== null && typeof end !== "string") return;
+      if (!setQuietHours(start as string | null, end as string | null)) {
+        ws.send(JSON.stringify({ type: "error", code: "bad-quiet-hours" }));
+        return;
+      }
+      broadcast({ type: "quiet-hours-updated", quietHours: getQuietHours() });
     } else if (type === "set-keywords") {
       // Phone-panel keyword editor: a comma-separated list. An empty
       // string disables urgency matching. Invalid lists are rejected
@@ -309,6 +326,17 @@ export function createServer(
   return server;
 }
 
+/** Push gate for the poller: reads live store state (VIPs, keywords,
+ * quiet hours) and decides whether a stored message goes to the
+ * glasses now. Exported so tests can drive it against the real store;
+ * main()'s onMessage calls it. */
+export function shouldPushToGlasses(
+  message: IncomingMessage,
+  now = new Date(),
+): boolean {
+  return shouldPush(message, listVips(), getKeywords(), getQuietHours(), now);
+}
+
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   const hub = createHub();
@@ -333,6 +361,12 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
       console.log(
         `[QuickReply] new message from ${message.chat_title}: ${message.text.slice(0, 60)}`,
       );
+      // Stored already by the poller; the push is gated — quiet hours
+      // hold normal messages on the server, VIP and urgent still go out.
+      if (!shouldPushToGlasses(message)) {
+        console.log("[QuickReply] held for quiet hours");
+        return;
+      }
       hub.broadcast({
         type: "message",
         message: {

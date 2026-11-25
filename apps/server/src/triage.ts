@@ -15,6 +15,46 @@ export function isUrgent(text: string, keywords: string[]): boolean {
   );
 }
 
+export type QuietHours = { start: string; end: string } | null;
+
+/** HH:MM on the 24-hour clock. Start is inclusive, end is exclusive.
+ * An overnight window (end < start) crosses midnight. Null bounds mean
+ * quiet hours are off. `now` is read in server-local time (WIB). */
+export function isQuietHour(
+  now: Date,
+  start: string | null,
+  end: string | null,
+): boolean {
+  if (start === null || end === null) return false;
+  const toMinutes = (hhmm: string): number => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const at = now.getHours() * 60 + now.getMinutes();
+  const from = toMinutes(start);
+  const to = toMinutes(end);
+  if (from === to) return false;
+  if (from < to) return at >= from && at < to;
+  return at >= from || at < to;
+}
+
+/**
+ * The poller push gate: a message is stored always, but pushed to the
+ * glasses only when it is not quiet hours — or when it is VIP or urgent.
+ */
+export function shouldPush(
+  message: Pick<StoredMessage, "sender_id" | "text">,
+  vips: number[],
+  keywords: string[],
+  quietHours: QuietHours,
+  now: Date,
+): boolean {
+  if (!quietHours) return true;
+  if (!isQuietHour(now, quietHours.start, quietHours.end)) return true;
+  if (message.sender_id !== null && vips.includes(message.sender_id)) return true;
+  return isUrgent(message.text, keywords);
+}
+
 export function rankInbox(
   messages: StoredMessage[],
   vips: number[],

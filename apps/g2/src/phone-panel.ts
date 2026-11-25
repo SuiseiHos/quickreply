@@ -18,6 +18,8 @@ export type ReplyPanelCallbacks = {
   onToggleVip?: (senderId: number, vip: boolean) => void;
   /** User saved the urgency keywords (comma-separated). */
   onSaveKeywords?: (keywords: string) => void;
+  /** User saved the quiet-hours window (both null turns it off). */
+  onSaveQuietHours?: (start: string | null, end: string | null) => void;
 };
 
 /** A chat the bot has seen, with its allowlist flag. */
@@ -135,6 +137,22 @@ function labeledInput(
   return { wrapper, input };
 }
 
+function labeledTimeInput(
+  label: string,
+  value: string,
+  id: string,
+): { wrapper: HTMLDivElement; input: HTMLInputElement } {
+  const wrapper = el("div", "qr-field");
+  const lab = el("label", "qr-label", label) as HTMLLabelElement;
+  lab.htmlFor = id;
+  const input = el("input", "qr-input") as HTMLInputElement;
+  input.id = id;
+  input.type = "time";
+  input.value = value;
+  wrapper.append(lab, input);
+  return { wrapper, input };
+}
+
 function primaryButton(label: string, onClick: () => void): HTMLButtonElement {
   const b = el("button", "qr-btn", label) as HTMLButtonElement;
   b.addEventListener("click", onClick);
@@ -155,14 +173,19 @@ export function renderReplyPanel(
   chats: PanelChat[],
   cb: ReplyPanelCallbacks,
   voice?: VoiceReply | null,
-  opts?: { senders?: PanelSender[]; keywords?: string[] },
+  opts?: {
+    senders?: PanelSender[];
+    keywords?: string[];
+    quietHours?: { start: string; end: string } | null;
+  },
 ): void {
   ensurePanelStyles();
   const appEl = document.querySelector<HTMLDivElement>("#app");
   if (!appEl) return;
   const senders = opts?.senders ?? [];
   const keywords = opts?.keywords ?? [];
-  const signature = JSON.stringify({ replies, chats, voice, senders, keywords });
+  const quietHours = opts?.quietHours ?? null;
+  const signature = JSON.stringify({ replies, chats, voice, senders, keywords, quietHours });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -247,7 +270,7 @@ export function renderReplyPanel(
     el(
       "p",
       "qr-card-help",
-      "VIP senders always come first in the inbox, even when their message is already read.",
+      "VIP senders always come first in the inbox, even when their message is already read — and their messages still reach the glasses during quiet hours.",
     ),
   );
   const vipList = el("div", "qr-chats");
@@ -292,6 +315,30 @@ export function renderReplyPanel(
     }),
   );
   root.append(keywordsCard);
+
+  const quietCard = el("section", "qr-card");
+  quietCard.id = "qr-quiet-card";
+  quietCard.append(
+    el("h2", "qr-card-title", "Quiet hours"),
+    el(
+      "p",
+      "qr-card-help",
+      "New messages wait on the server during these hours and reach the glasses later. VIP and urgent messages still come through. Both empty turns quiet hours off.",
+    ),
+  );
+  const quietFields = el("div", "qr-fields");
+  const startField = labeledTimeInput("From", quietHours?.start ?? "", "qr-quiet-start");
+  const endField = labeledTimeInput("Until", quietHours?.end ?? "", "qr-quiet-end");
+  quietFields.append(startField.wrapper, endField.wrapper);
+  quietCard.append(quietFields);
+  quietCard.append(
+    primaryButton("Save quiet hours", () => {
+      const start = startField.input.value === "" ? null : startField.input.value;
+      const end = endField.input.value === "" ? null : endField.input.value;
+      cb.onSaveQuietHours?.(start, end);
+    }),
+  );
+  root.append(quietCard);
 
   if (voice && cb.onSaveVoice) {
     const voiceCard = el("section", "qr-card");
