@@ -106,9 +106,19 @@ test("rankInbox still puts VIP ahead of urgent", () => {
 });
 
 function at(hour: number, minute: number): Date {
-  // Local time: the server's quiet hours run on server-local time (WIB).
-  return new Date(2026, 10, 25, hour, minute);
+  // A WIB wall-clock instant: quiet hours are defined in Jakarta time,
+  // so the instant is built from UTC explicitly instead of relying on
+  // the process-local timezone (the VM runs in UTC).
+  return new Date(Date.UTC(2026, 10, 25, hour - 7, minute));
 }
+
+test("isQuietHour reads Jakarta wall-clock time, not the process timezone", () => {
+  // 16:00 UTC is 23:00 in Jakarta — quiet in a 22:00-07:00 window,
+  // even though 16:00 UTC itself is outside it.
+  expect(isQuietHour(new Date(Date.UTC(2026, 10, 25, 16, 0)), "22:00", "07:00")).toBe(true);
+  // 01:00 UTC is 08:00 in Jakarta — outside the window.
+  expect(isQuietHour(new Date(Date.UTC(2026, 10, 25, 1, 0)), "22:00", "07:00")).toBe(false);
+});
 
 test("isQuietHour covers an overnight window, start inclusive, end exclusive", () => {
   expect(isQuietHour(at(22, 0), "22:00", "07:00")).toBe(true);

@@ -11,6 +11,8 @@ export type UndoWindow = {
   start(key: string, nowMs: number): void;
   tap(nowMs: number): UndoTap;
   expire(nowMs: number): string | null;
+  /** Drop the pending key without firing or cancelling via a tap. */
+  clear(): void;
 };
 
 export function createUndoWindow(
@@ -28,6 +30,9 @@ export function createUndoWindow(
     tap(nowMs: number): UndoTap {
       if (!pending) return "none";
       if (nowMs - pending.startedAt < armMs) return "ignored";
+      // At or past the window end the send has fired (or is firing) —
+      // a late tap must not cancel a message that already went out.
+      if (nowMs - pending.startedAt >= windowMs) return "none";
       pending = null;
       return "cancelled";
     },
@@ -37,6 +42,9 @@ export function createUndoWindow(
       const key = pending.key;
       pending = null;
       return key;
+    },
+    clear(): void {
+      pending = null;
     },
   };
 }

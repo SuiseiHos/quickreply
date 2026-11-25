@@ -19,7 +19,16 @@ export type QuietHours = { start: string; end: string } | null;
 
 /** HH:MM on the 24-hour clock. Start is inclusive, end is exclusive.
  * An overnight window (end < start) crosses midnight. Null bounds mean
- * quiet hours are off. `now` is read in server-local time (WIB). */
+ * quiet hours are off. The wall-clock hour is read in Asia/Jakarta
+ * explicitly — never from the process-local timezone, which depends on
+ * whatever shell started the server (the VM itself runs in UTC). */
+const wibTime = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
 export function isQuietHour(
   now: Date,
   start: string | null,
@@ -30,7 +39,10 @@ export function isQuietHour(
     const [h, m] = hhmm.split(":").map(Number);
     return h * 60 + m;
   };
-  const at = now.getHours() * 60 + now.getMinutes();
+  const parts = wibTime.formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const at = hour * 60 + minute;
   const from = toMinutes(start);
   const to = toMinutes(end);
   if (from === to) return false;

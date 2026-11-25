@@ -575,12 +575,14 @@ test("WS set-vip with a malformed payload is ignored, no crash", async () => {
 });
 
 test("shouldPushToGlasses reads live store state for the gate", async () => {
-  // A window covering right now, computed from the clock.
+  // A window covering right now, computed from the clock in Jakarta
+  // time (quiet hours are defined in WIB, not process-local time).
   const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   const fmt = (d: Date): string =>
-    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  const start = fmt(new Date(now.getTime() - 60 * 60 * 1000));
-  const end = fmt(new Date(now.getTime() + 60 * 60 * 1000));
+    `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  const start = fmt(new Date(wib.getTime() - 60 * 60 * 1000));
+  const end = fmt(new Date(wib.getTime() + 60 * 60 * 1000));
   expect(setQuietHours(start, end)).toBe(true);
   const normal = { ...FIXTURE, sender_id: 777, text: "hi" };
   expect(shouldPushToGlasses(normal, now)).toBe(false);

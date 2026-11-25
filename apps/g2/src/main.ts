@@ -103,6 +103,9 @@ let pendingCanned:
 /** The undo window for the pending canned send (2 s, 300 ms arm delay). */
 const undoWindow: UndoWindow = createUndoWindow(2000);
 let undoTimer: ReturnType<typeof setTimeout> | null = null;
+/** Wall-clock ms when the current undo window was armed (for M1's
+ * reschedule math — the timer can fire a hair before the window ends). */
+let undoArmedAt = 0;
 /** What the error screen's tap retries: re-send, or re-record (voice). */
 let errorRetry: "send" | "record" | null = null;
 let receipt: { chatTitle: string; text: string; sentAt: string } | null = null;
@@ -275,6 +278,7 @@ function armCannedSend(): void {
     idempotencyKey: key,
   };
   undoWindow.start(key, Date.now());
+  undoArmedAt = Date.now();
   screen = "confirming";
   clearUndoTimer();
   undoTimer = setTimeout(firePendingCannedSend, 2000);
@@ -286,7 +290,14 @@ function armCannedSend(): void {
 function firePendingCannedSend(): void {
   if (!pendingCanned) return;
   const key = undoWindow.expire(Date.now());
-  if (key === null) return; // already cancelled
+  if (key === null) {
+    // The timer fired a hair before the window ended (or the clock
+    // jumped back): wait out the rest instead of stranding the
+    // confirming screen with a send that never fires.
+    const remaining = 2000 - (Date.now() - undoArmedAt);
+    undoTimer = setTimeout(firePendingCannedSend, Math.max(remaining, 50));
+    return;
+  }
   const pending = pendingCanned;
   pendingCanned = null;
   clearUndoTimer();
@@ -311,6 +322,7 @@ function firePendingCannedSend(): void {
 function cancelPendingCannedSend(): void {
   if (!pendingCanned) return;
   clearUndoTimer();
+  undoWindow.clear();
   pendingCanned = null;
   screen = "menu";
   render();

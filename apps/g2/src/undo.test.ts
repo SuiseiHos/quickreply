@@ -41,6 +41,24 @@ test("tap after expiry returns none", () => {
   expect(w.tap(3100)).toBe("none");
 });
 
+test("tap at or after the window end does not cancel (the send has fired or is firing)", () => {
+  const w = createUndoWindow(2000);
+  w.start("key-1", 1000);
+  // Exactly at the window end: the timer owns the send now, not the tap.
+  expect(w.tap(3000)).toBe("none");
+  expect(w.pending).toBe("key-1");
+  expect(w.tap(3100)).toBe("none");
+  expect(w.pending).toBe("key-1");
+});
+
+test("clear drops the pending key", () => {
+  const w = createUndoWindow(2000);
+  w.start("key-1", 1000);
+  w.clear();
+  expect(w.pending).toBeNull();
+  expect(w.tap(1400)).toBe("none");
+});
+
 test("expire with nothing pending returns null", () => {
   const w = createUndoWindow(2000);
   expect(w.expire(1000)).toBeNull();
