@@ -11,8 +11,10 @@ import {
   isAllowedChat,
   recordKnownChat,
   saveMessage,
+  setBusinessConnection,
   setChatAllowed,
   setOffset,
+  type BusinessConnection,
   type IncomingMessage,
 } from "./message-store.js";
 
@@ -70,10 +72,13 @@ export type SentMessage = {
 };
 
 /** Sends a text message; the transport is injectable so tests can use a
- * fake instead of delivering a real message to a real chat. */
+ * fake instead of delivering a real message to a real chat. When
+ * `businessConnectionId` is set, Telegram delivers the message as sent by
+ * the business account that owns that connection. */
 export type SendTelegramFn = (
   chatId: number,
   text: string,
+  businessConnectionId?: string,
 ) => Promise<SentMessage>;
 
 /** Live getMe (read-only): proves the token + helper path work. */
@@ -88,20 +93,26 @@ export async function getMe(): Promise<{ ok: boolean; result: BotIdentity }> {
 /**
  * Sends a text message to a chat (silent: disable_notification=true, so
  * the reply does not buzz the user's phone). Returns the sent message,
- * including its Telegram message_id.
+ * including its Telegram message_id. With a business connection id, the
+ * message is sent as the business account, not the bot.
  */
-export const sendMessage: SendTelegramFn = async (chatId, text) => {
-  const res = await callHelper(
-    [
-      "sendmessage",
-      "--chat-id",
-      String(chatId),
-      "--text",
-      text,
-      "--disable-notification",
-    ],
-    30000,
-  );
+export const sendMessage: SendTelegramFn = async (
+  chatId,
+  text,
+  businessConnectionId,
+) => {
+  const args = [
+    "sendmessage",
+    "--chat-id",
+    String(chatId),
+    "--text",
+    text,
+    "--disable-notification",
+  ];
+  if (businessConnectionId) {
+    args.push("--business-connection-id", businessConnectionId);
+  }
+  const res = await callHelper(args, 30000);
   if (res.ok !== true) {
     throw new Error(
       `sendMessage failed: ${JSON.stringify(res).slice(0, 200)}`,
@@ -128,15 +139,68 @@ export async function fetchUpdates(
 }
 
 /**
+ * Converts a `business_connection` update into the stored connection, or
+ * null when it is malformed. Telegram sends one whenever the connection
+ * changes: the owner connects the bot, disconnects it, or `can_reply`
+ * flips (e.g. after 24h without a customer message).
+ */
+export function parseBusinessConnection(update: unknown): BusinessConnection | null {
+  if (typeof update !== "object" || update === null) return null;
+  const c = (update as { business_connection?: unknown }).business_connection as
+    | {
+        id?: unknown;
+        user_chat_id?: unknown;
+        can_reply?: unknown;
+        is_enabled?: unknown;
+      }
+    | undefined;
+  if (!c || typeof c !== "object") return null;
+  if (typeof c.id !== "string" || c.id.length === 0) return null;
+  if (typeof c.user_chat_id !== "number") return null;
+  if (typeof c.can_reply !== "boolean") return null;
+  if (typeof c.is_enabled !== "boolean") return null;
+  return {
+    id: c.id,
+    user_chat_id: c.user_chat_id,
+    can_reply: c.can_reply,
+    is_enabled: c.is_enabled,
+  };
+}
+
+/**
  * Converts one raw update into a stored message, or null when it is not a
  * text message from a human sender (edits, photos, bot messages, ...).
- * The id is chat_id:message_id — globally unique and deterministic.
+ * Accepts both ordinary `message` updates and `business_message` updates
+ * (same Message shape, plus the connection id from the envelope). The id
+ * is chat_id:message_id — globally unique and deterministic.
  */
 export function parseUpdate(update: unknown): IncomingMessage | null {
   if (typeof update !== "object" || update === null) return null;
-  const u = update as { update_id?: unknown; message?: unknown };
+  const u = update as {
+    update_id?: unknown;
+    message?: unknown;
+    business_message?: unknown;
+  };
   if (typeof u.update_id !== "number") return null;
-  const m = u.message as
+  if (u.message !== undefined) {
+    return parseMessageObject(u.update_id, u.message, null);
+  }
+  const bm = u.business_message as
+    | { connection_id?: unknown; message?: unknown }
+    | undefined;
+  if (!bm || typeof bm !== "object") return null;
+  if (typeof bm.connection_id !== "string" || bm.connection_id.length === 0) {
+    return null;
+  }
+  return parseMessageObject(u.update_id, bm.message, bm.connection_id);
+}
+
+function parseMessageObject(
+  updateId: number,
+  raw: unknown,
+  businessConnectionId: string | null,
+): IncomingMessage | null {
+  const m = raw as
     | {
         message_id?: unknown;
         date?: unknown;
@@ -164,11 +228,12 @@ export function parseUpdate(update: unknown): IncomingMessage | null {
   const dateSeconds = typeof m.date === "number" ? m.date : 0;
   return {
     id: `${chat.id}:${m.message_id}`,
-    update_id: u.update_id,
+    update_id: updateId,
     chat_id: chat.id,
     chat_title: chatTitle,
     sender_id: senderId,
     sender_name: senderName,
+    business_connection_id: businessConnectionId,
     text: m.text,
     created_at: new Date(dateSeconds * 1000).toISOString(),
   };
@@ -212,6 +277,9 @@ export type PollerOptions = {
   onNewChat?: (chat: { chat_id: number; chat_title: string }) => void;
   /** Fires when the bot is removed from a chat (kicked/left). */
   onChatRemoved?: (chat: { chat_id: number; chat_title: string }) => void;
+  /** Fires when a Telegram Business connection changes (connected,
+   * disconnected, or can_reply flipped). */
+  onBusinessConnection?: (conn: BusinessConnection) => void;
   onError?: (err: unknown) => void;
   /** Long-poll timeout per round in seconds (Telegram allows up to 50). */
   pollTimeoutSec?: number;
@@ -307,6 +375,14 @@ export function startPoller(opts: PollerOptions): { stop: () => void } {
   }
 
   function processUpdate(update: unknown): void {
+    // Business connection change: store it so the send path and the
+    // phone panel know whether replies can go out as the business.
+    const conn = parseBusinessConnection(update);
+    if (conn) {
+      setBusinessConnection(conn);
+      opts.onBusinessConnection?.(conn);
+      return;
+    }
     // Bot removed from a chat: stop allowlisting it.
     // History stays in the inbox; a reply attempt fails cleanly
     // at Telegram with send-failed.

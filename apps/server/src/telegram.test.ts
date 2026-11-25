@@ -2,7 +2,7 @@ import { beforeEach, test, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseUpdate, parseChatMemberUpdate, getMe, startPoller } from "./telegram.js";
+import { parseUpdate, parseBusinessConnection, parseChatMemberUpdate, getMe, startPoller } from "./telegram.js";
 import {
   recordKnownChat,
   isAllowedChat,
@@ -40,9 +40,122 @@ test("parseUpdate converts a group text message", () => {
     chat_title: "Ops",
     sender_id: 555,
     sender_name: "Ani Putri",
+    business_connection_id: null,
     text: "hello from the group",
     created_at: new Date(1795524000 * 1000).toISOString(),
   });
+});
+
+const BUSINESS_CONNECTION_UPDATE = {
+  update_id: 2001,
+  business_connection: {
+    id: "conn-1",
+    user: { id: 777, first_name: "Alvin", is_bot: false },
+    user_chat_id: 777,
+    date: 1795524000,
+    can_reply: true,
+    is_enabled: true,
+  },
+};
+
+const BUSINESS_MESSAGE_UPDATE = {
+  update_id: 2002,
+  business_message: {
+    connection_id: "conn-1",
+    message: {
+      message_id: 5,
+      date: 1795524000,
+      chat: { id: 888, type: "private" },
+      from: { id: 888, first_name: "Customer" },
+      text: "hi, I need help",
+    },
+  },
+};
+
+test("parseBusinessConnection converts a connect update", () => {
+  expect(parseBusinessConnection(BUSINESS_CONNECTION_UPDATE)).toEqual({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: true,
+    is_enabled: true,
+  });
+});
+
+test("parseBusinessConnection reads a disconnect (is_enabled false)", () => {
+  const update = {
+    ...BUSINESS_CONNECTION_UPDATE,
+    business_connection: {
+      ...BUSINESS_CONNECTION_UPDATE.business_connection,
+      can_reply: false,
+      is_enabled: false,
+    },
+  };
+  expect(parseBusinessConnection(update)).toEqual({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: false,
+    is_enabled: false,
+  });
+});
+
+test("parseBusinessConnection ignores malformed updates", () => {
+  expect(parseBusinessConnection({ update_id: 2003 })).toBeNull();
+  expect(
+    parseBusinessConnection({
+      update_id: 2004,
+      business_connection: { user_chat_id: 777 },
+    }),
+  ).toBeNull();
+});
+
+test("parseUpdate converts a business message, tagged with its connection id", () => {
+  expect(parseUpdate(BUSINESS_MESSAGE_UPDATE)).toEqual({
+    id: "888:5",
+    update_id: 2002,
+    chat_id: 888,
+    chat_title: "Customer",
+    sender_id: 888,
+    sender_name: "Customer",
+    business_connection_id: "conn-1",
+    text: "hi, I need help",
+    created_at: new Date(1795524000 * 1000).toISOString(),
+  });
+});
+
+test("parseUpdate ignores malformed business messages", () => {
+  // No connection id: the update carries no way to reply as the business.
+  expect(
+    parseUpdate({
+      update_id: 2005,
+      business_message: { message: BUSINESS_MESSAGE_UPDATE.business_message.message },
+    }),
+  ).toBeNull();
+  // Bot sender and non-text, same rules as the normal path.
+  expect(
+    parseUpdate({
+      update_id: 2006,
+      business_message: {
+        connection_id: "conn-1",
+        message: {
+          ...BUSINESS_MESSAGE_UPDATE.business_message.message,
+          from: { id: 999, first_name: "OtherBot", is_bot: true },
+        },
+      },
+    }),
+  ).toBeNull();
+  expect(
+    parseUpdate({
+      update_id: 2007,
+      business_message: {
+        connection_id: "conn-1",
+        message: {
+          ...BUSINESS_MESSAGE_UPDATE.business_message.message,
+          text: undefined,
+          photo: [{}],
+        },
+      },
+    }),
+  ).toBeNull();
 });
 
 test("parseUpdate sets sender_id null when the sender has no id", () => {
