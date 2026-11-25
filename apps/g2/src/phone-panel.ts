@@ -23,6 +23,13 @@ export type ReplyPanelCallbacks = {
 };
 
 /** A chat the bot has seen, with its allowlist flag. */
+export type PanelBusinessConnection = {
+  id: string;
+  user_chat_id: number;
+  can_reply: boolean;
+  is_enabled: boolean;
+};
+
 export type PanelChat = {
   chat_id: number;
   chat_title: string;
@@ -177,6 +184,7 @@ export function renderReplyPanel(
     senders?: PanelSender[];
     keywords?: string[];
     quietHours?: { start: string; end: string } | null;
+    businessConnections?: PanelBusinessConnection[];
   },
 ): void {
   ensurePanelStyles();
@@ -185,7 +193,8 @@ export function renderReplyPanel(
   const senders = opts?.senders ?? [];
   const keywords = opts?.keywords ?? [];
   const quietHours = opts?.quietHours ?? null;
-  const signature = JSON.stringify({ replies, chats, voice, senders, keywords, quietHours });
+  const businessConnections = opts?.businessConnections ?? [];
+  const signature = JSON.stringify({ replies, chats, voice, senders, keywords, quietHours, businessConnections });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -339,6 +348,32 @@ export function renderReplyPanel(
     }),
   );
   root.append(quietCard);
+
+  const businessCard = el("section", "qr-card");
+  businessCard.id = "qr-business-card";
+  const live = businessConnections.filter((c) => c.is_enabled);
+  businessCard.append(el("h2", "qr-card-title", "Telegram Business"));
+  if (live.length === 0) {
+    businessCard.append(
+      el(
+        "p",
+        "qr-card-help",
+        "Not connected — connect the bot in Telegram Business settings to reply as your business account.",
+      ),
+    );
+  } else {
+    const canReply = live.some((c) => c.can_reply);
+    businessCard.append(
+      el(
+        "p",
+        "qr-card-help",
+        canReply
+          ? "Connected — replies in customer chats go out as your business account."
+          : "Connected, but replies are paused (no customer message in the last 24 hours).",
+      ),
+    );
+  }
+  root.append(businessCard);
 
   if (voice && cb.onSaveVoice) {
     const voiceCard = el("section", "qr-card");

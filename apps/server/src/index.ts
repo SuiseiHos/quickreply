@@ -11,6 +11,7 @@ import {
   getMessage,
   getQuietHours,
   getReplies,
+  listBusinessConnections,
   listInbox,
   listKnownChats,
   listSenders,
@@ -147,6 +148,7 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
           vips,
           keywords,
           quietHours: getQuietHours(),
+          businessConnections: listBusinessConnections(),
         }),
       );
     } else if (type === "set-quiet-hours") {
@@ -377,6 +379,12 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
     },
     onNewChat: () => {
       hub.broadcast({ type: "chats-updated", chats: listKnownChats() });
+    },
+    onBusinessConnection: () => {
+      hub.broadcast({
+        type: "business-connections-updated",
+        businessConnections: listBusinessConnections(),
+      });
     },
     onChatRemoved: () => {
       hub.broadcast({ type: "chats-updated", chats: listKnownChats() });

@@ -28,7 +28,7 @@ import {
   type InboxMessage,
 } from "./screens";
 import { createUndoWindow, type UndoWindow } from "./undo";
-import { renderReplyPanel, setPanelStatus, type PanelChat, type PanelSender } from "./phone-panel";
+import { renderReplyPanel, setPanelStatus, type PanelBusinessConnection, type PanelChat, type PanelSender } from "./phone-panel";
 
 const HOME_CONTAINER_ID = 1;
 const HOME_CONTAINER_NAME = "home";
@@ -82,6 +82,7 @@ let keywords: string[] = [];
 let keywordsSavePending = false;
 let quietHours: { start: string; end: string } | null = null;
 let quietHoursSavePending = false;
+let businessConnections: PanelBusinessConnection[] = [];
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -204,7 +205,7 @@ function render(): void {
   (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
     ? { messageId: voiceMessage.id, text: reviewTranscript }
     : null,
-  { senders, keywords, quietHours },
+  { senders, keywords, quietHours, businessConnections },
   );
 }
 
@@ -618,7 +619,7 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown; quietHours?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown; quietHours?: unknown; businessConnections?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
@@ -646,6 +647,9 @@ function handleServerMessage(raw: string): void {
     ) {
       quietHours = payload.quietHours as { start: string; end: string } | null;
     }
+    if (Array.isArray(payload.businessConnections)) {
+      businessConnections = payload.businessConnections as PanelBusinessConnection[];
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
@@ -664,6 +668,12 @@ function handleServerMessage(raw: string): void {
     if (quietHoursSavePending) {
       setPanelStatus("Saved", "ok");
       quietHoursSavePending = false;
+    }
+    render();
+  } else if (type === "business-connections-updated") {
+    const next = (msg as { businessConnections?: unknown }).businessConnections;
+    if (Array.isArray(next)) {
+      businessConnections = next as PanelBusinessConnection[];
     }
     render();
   } else if (type === "keywords-updated") {

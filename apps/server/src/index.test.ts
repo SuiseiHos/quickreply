@@ -11,6 +11,7 @@ import {
   getQuietHours,
   setQuietHours,
   setVip,
+  setBusinessConnection,
   recordKnownChat,
   isAllowedChat,
   setChatAllowed,
@@ -103,6 +104,35 @@ test("WS list-inbox returns the stored messages", async () => {
         "Can't talk now",
         "Yes",
         "No",
+      ]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS list-inbox carries the stored business connections", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg = await reply;
+      expect(msg.businessConnections).toEqual([]);
+      setBusinessConnection({
+        id: "conn-1",
+        user_chat_id: 777,
+        can_reply: true,
+        is_enabled: true,
+      });
+      const reply2 = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg2 = await reply2;
+      expect(msg2.businessConnections).toEqual([
+        { id: "conn-1", user_chat_id: 777, can_reply: true, is_enabled: true },
       ]);
     } finally {
       ws.close();

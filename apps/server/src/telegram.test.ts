@@ -250,10 +250,12 @@ function groupUpdate(updateId: number, chatId: number, title: string, text: stri
 async function runPollerOnce(batches: unknown[][]) {
   const forwarded: unknown[] = [];
   const newChats: { chat_id: number; chat_title: string }[] = [];
+  const businessConnections: unknown[] = [];
   let calls = 0;
   const poller = startPoller({
     onMessage: (m) => forwarded.push(m),
     onNewChat: (c) => newChats.push(c),
+    onBusinessConnection: (c) => businessConnections.push(c),
     fetchUpdates: async () => {
       // Each batch is delivered once, like Telegram (the offset advances);
       // later rounds return [].
@@ -269,7 +271,7 @@ async function runPollerOnce(batches: unknown[][]) {
   // does not wait for it, and a late batch must be judged under the
   // allowlist as it stood when the round was fetched.
   await new Promise((r) => setTimeout(r, 30));
-  return { forwarded, newChats };
+  return { forwarded, newChats, businessConnections };
 }
 
 test("poller forwards only allowlisted chats; a stranger's /command changes nothing", async () => {
@@ -343,6 +345,42 @@ test("parseChatMemberUpdate reports kicked/left, ignores the rest", () => {
   };
   expect(parseChatMemberUpdate(member)).toBeNull();
   expect(parseChatMemberUpdate(GROUP_UPDATE)).toBeNull();
+});
+
+test("poller stores a business connection and reports it", async () => {
+  const { businessConnections } = await runPollerOnce([
+    [BUSINESS_CONNECTION_UPDATE],
+  ]);
+  expect(businessConnections).toEqual([
+    { id: "conn-1", user_chat_id: 777, can_reply: true, is_enabled: true },
+  ]);
+  const { getBusinessConnection } = await import("./message-store.js");
+  expect(getBusinessConnection("conn-1")).toEqual({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: true,
+    is_enabled: true,
+  });
+});
+
+test("poller forwards a business message from an allowlisted chat, tagged with its connection", async () => {
+  recordKnownChat(888, "Customer");
+  setChatAllowed(888, true);
+  const { forwarded } = await runPollerOnce([[BUSINESS_MESSAGE_UPDATE]]);
+  expect(forwarded).toHaveLength(1);
+  expect(forwarded[0]).toMatchObject({
+    id: "888:5",
+    business_connection_id: "conn-1",
+    text: "hi, I need help",
+  });
+});
+
+test("poller holds a business message from a chat that was never approved", async () => {
+  const { forwarded, newChats } = await runPollerOnce([
+    [BUSINESS_MESSAGE_UPDATE],
+  ]);
+  expect(forwarded).toHaveLength(0);
+  expect(newChats).toEqual([{ chat_id: 888, chat_title: "Customer" }]);
 });
 
 test("poller removes an allowed chat when the bot is kicked", async () => {  recordKnownChat(-123, "Ops");
