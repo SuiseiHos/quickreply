@@ -236,3 +236,9 @@ export function editHintScreen(): string {
 export function sendingScreen(): string {
   return "Sending...";
 }
+
+/** Pending-send screen: a canned reply waits 2 s before firing; a second
+ * tap inside the window cancels it. */
+export function pendingSendScreen(): string {
+  return ["Sending...", "", "Tap again to cancel"].join("\n");
+}

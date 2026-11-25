@@ -18,6 +18,7 @@ import {
   inboxScreen,
   messageScreen,
   messagePageCount,
+  pendingSendScreen,
   receiptScreen,
   recordingScreen,
   replyMenuScreen,
@@ -26,6 +27,7 @@ import {
   transcribingScreen,
   type InboxMessage,
 } from "./screens";
+import { createUndoWindow, type UndoWindow } from "./undo";
 import { renderReplyPanel, setPanelStatus, type PanelChat } from "./phone-panel";
 
 const HOME_CONTAINER_ID = 1;
@@ -52,6 +54,7 @@ type Screen =
   | "inbox"
   | "message"
   | "menu"
+  | "confirming"
   | "sending"
   | "receipt"
   | "error"
@@ -87,6 +90,13 @@ let lastSend:
   | { kind: "voice"; messageId: string; text: string; idempotencyKey: string }
   | null = null;
 let errorText = "Send failed. Tap to retry.";
+/** A canned send waiting out its 2 s undo window (not sent yet). */
+let pendingCanned:
+  | { messageId: string; slot: number; idempotencyKey: string }
+  | null = null;
+/** The undo window for the pending canned send (2 s, 300 ms arm delay). */
+const undoWindow: UndoWindow = createUndoWindow(2000);
+let undoTimer: ReturnType<typeof setTimeout> | null = null;
 /** What the error screen's tap retries: re-send, or re-record (voice). */
 let errorRetry: "send" | "record" | null = null;
 let receipt: { chatTitle: string; text: string; sentAt: string } | null = null;
@@ -125,6 +135,8 @@ function currentScreenText(): string {
       return currentMessage
         ? replyMenuScreen(currentMessage.chat_title, replies, menuSelected)
         : homeScreen(unreadCount);
+    case "confirming":
+      return pendingSendScreen();
     case "sending":
       return sendingScreen();
     case "recording":
@@ -224,17 +236,63 @@ function openMenu(): void {
   render();
 }
 
-function sendCanned(): void {
+function clearUndoTimer(): void {
+  if (undoTimer) {
+    clearTimeout(undoTimer);
+    undoTimer = null;
+  }
+}
+
+/** Tap on a canned reply: arm the 2 s undo window instead of sending.
+ * The send fires only when the window expires (firePendingCannedSend);
+ * a second tap inside the window cancels it. */
+function armCannedSend(): void {
   if (!currentMessage) return;
   const key = newIdempotencyKey();
-  lastSend = { kind: "canned", messageId: currentMessage.id, slot: menuSelected, idempotencyKey: key };
-  screen = "sending";
-  sendToServer({
-    type: "send-canned",
+  pendingCanned = {
     messageId: currentMessage.id,
     slot: menuSelected,
     idempotencyKey: key,
+  };
+  undoWindow.start(key, Date.now());
+  screen = "confirming";
+  clearUndoTimer();
+  undoTimer = setTimeout(firePendingCannedSend, 2000);
+  render();
+}
+
+/** The undo window expired: fire the pending canned send exactly as the
+ * old immediate send did (same gate, same receipt, same idempotency key). */
+function firePendingCannedSend(): void {
+  if (!pendingCanned) return;
+  const key = undoWindow.expire(Date.now());
+  if (key === null) return; // already cancelled
+  const pending = pendingCanned;
+  pendingCanned = null;
+  clearUndoTimer();
+  lastSend = {
+    kind: "canned",
+    messageId: pending.messageId,
+    slot: pending.slot,
+    idempotencyKey: pending.idempotencyKey,
+  };
+  screen = "sending";
+  sendToServer({
+    type: "send-canned",
+    messageId: pending.messageId,
+    slot: pending.slot,
+    idempotencyKey: pending.idempotencyKey,
   });
+  render();
+}
+
+/** Second tap inside the undo window: drop the pending send, back to
+ * the reply menu. Nothing was sent, so no idempotency key is consumed. */
+function cancelPendingCannedSend(): void {
+  if (!pendingCanned) return;
+  clearUndoTimer();
+  pendingCanned = null;
+  screen = "menu";
   render();
 }
 
@@ -335,6 +393,17 @@ function cycleMenuSelection(delta: number): void {
 }
 
 function handleTap(): void {
+  // A tap while a canned send waits out its undo window cancels it —
+  // and this check runs BEFORE the 500 ms dedupe below, because the
+  // cancelling tap is a deliberate second tap, not a duplicate delivery
+  // of the first. The window's own 300 ms arm delay swallows the
+  // duplicate instead (see undo.ts).
+  if (screen === "confirming") {
+    if (undoWindow.tap(Date.now()) === "cancelled") {
+      cancelPendingCannedSend();
+    }
+    return;
+  }
   const now = Date.now();
   if (now - lastTapAt < 500) return;
   lastTapAt = now;
@@ -351,7 +420,7 @@ function handleTap(): void {
       openMenu();
       break;
     case "menu":
-      sendCanned();
+      armCannedSend();
       break;
     case "recording":
       stopRecording();
@@ -451,6 +520,9 @@ function handleLongPress(): void {
         screen = "message";
         render();
       }
+      break;
+    case "confirming":
+      cancelPendingCannedSend();
       break;
     case "recording":
       cancelRecording();
