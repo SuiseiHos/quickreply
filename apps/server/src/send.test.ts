@@ -6,6 +6,8 @@ import {
   saveMessage,
   getSend,
   setBusinessConnection,
+  setChatReplies,
+  recordKnownChat,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -198,6 +200,41 @@ test("an ordinary message still sends without a connection id", async () => {
   );
   expect(result.ok).toBe(true);
   expect(calls[0].businessConnectionId).toBeUndefined();
+});
+
+// --- Per-chat replies: the send resolves the message chat's set ---
+
+test("a canned send to a chat with a custom set sends the chat's text", async () => {
+  recordKnownChat(-123, "Ops");
+  setChatReplies(-123, ["On it", "In a meeting", "Will check", "Yes", "No"]);
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "-123:7", slot: 0, idempotencyKey: "key-chat-1" },
+    fn,
+  );
+  expect(result.ok).toBe(true);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].text).toBe("On it");
+});
+
+test("a canned send to a chat without a custom set sends the global text", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "-123:7", slot: 0, idempotencyKey: "key-chat-2" },
+    fn,
+  );
+  expect(result.ok).toBe(true);
+  expect(calls[0].text).toBe("On my way");
+});
+
+test("a canned send for an unknown message returns unknown-chat", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "-999:1", slot: 0, idempotencyKey: "key-chat-3" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "unknown-chat" });
+  expect(calls).toHaveLength(0);
 });
 
 // --- sendText: the voice path resolves the text itself and

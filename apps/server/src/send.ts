@@ -10,7 +10,7 @@
 import {
   getBusinessConnection,
   getMessage,
-  getReplies,
+  getRepliesForChat,
   getSend,
   recordSend,
 } from "./message-store.js";
@@ -123,9 +123,13 @@ export async function sendCanned(
 ): Promise<SendResult> {
   const { messageId, slot, idempotencyKey } = input;
 
-  // The slot resolves to the reply text; an out-of-range slot is a client
-  // bug and fails like any other send failure (the glasses show retry).
-  const replies = getReplies();
+  // The slot resolves to the reply text from the message's own chat set
+  // when it has one, else the global set; an out-of-range slot is a
+  // client bug and fails like any other send failure (the glasses show
+  // retry). An unknown message fails here too, before sendText's gate.
+  const message = getMessage(messageId);
+  if (!message) return { ok: false, code: "unknown-chat" };
+  const replies = getRepliesForChat(message.chat_id);
   if (slot < 0 || slot >= replies.length) {
     return { ok: false, code: "send-failed" };
   }
