@@ -8,6 +8,7 @@
 // sendCanned resolves a reply slot to its text; sendText sends free text
 // (the voice path). Both share this gate — never duplicate it.
 import {
+  getBusinessConnection,
   getMessage,
   getReplies,
   getSend,
@@ -68,9 +69,22 @@ async function sendTextOnce(
   if (text.trim().length === 0) return { ok: false, code: "empty" };
   if (text.length > 4096) return { ok: false, code: "too-long" };
 
+  // Business: a reply to a business message goes out as the business
+  // account. The connection must be live (enabled + can_reply) right
+  // now; otherwise fail cleanly — nothing is sent and no key is
+  // consumed, so a retry after reconnecting works.
+  let businessConnectionId: string | undefined;
+  if (message.business_connection_id) {
+    const conn = getBusinessConnection(message.business_connection_id);
+    if (!conn || !conn.is_enabled || !conn.can_reply) {
+      return { ok: false, code: "business-unavailable" };
+    }
+    businessConnectionId = conn.id;
+  }
+
   let sent;
   try {
-    sent = await sendTelegram(message.chat_id, text);
+    sent = await sendTelegram(message.chat_id, text, businessConnectionId);
   } catch {
     return { ok: false, code: "send-failed" };
   }

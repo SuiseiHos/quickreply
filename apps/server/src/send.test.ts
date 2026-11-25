@@ -5,6 +5,7 @@ import { sendCanned, sendText } from "./send.js";
 import {
   saveMessage,
   getSend,
+  setBusinessConnection,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -34,14 +35,35 @@ beforeEach(() => {
 
 function makeFake(): {
   fn: SendTelegramFn;
-  calls: { chatId: number; text: string }[];
+  calls: { chatId: number; text: string; businessConnectionId?: string }[];
 } {
-  const calls: { chatId: number; text: string }[] = [];
-  const fn: SendTelegramFn = async (chatId, text) => {
-    calls.push({ chatId, text });
+  const calls: { chatId: number; text: string; businessConnectionId?: string }[] = [];
+  const fn: SendTelegramFn = async (chatId, text, businessConnectionId) => {
+    calls.push({ chatId, text, businessConnectionId });
     return { message_id: 99, chat: { id: chatId }, date: 1795524000, text };
   };
   return { fn, calls };
+}
+
+const BUSINESS_FIXTURE: IncomingMessage = {
+  ...FIXTURE,
+  id: "888:5",
+  update_id: 2002,
+  chat_id: 888,
+  chat_title: "Customer",
+  sender_id: 888,
+  sender_name: "Customer",
+  business_connection_id: "conn-1",
+  text: "hi, I need help",
+};
+
+function connectBusiness(over: { can_reply?: boolean; is_enabled?: boolean } = {}): void {
+  setBusinessConnection({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: over.can_reply ?? true,
+    is_enabled: over.is_enabled ?? true,
+  });
 }
 
 test("sends the canned text for the slot and returns a receipt", async () => {
@@ -115,6 +137,67 @@ test("a failed Telegram send returns send-failed and stores no key", async () =>
   );
   expect(second.ok).toBe(true);
   expect(calls).toHaveLength(1);
+});
+
+// --- Telegram Business: the reply goes out as the business account ---
+
+test("a business reply is sent with its connection id", async () => {
+  saveMessage(BUSINESS_FIXTURE);
+  connectBusiness();
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "888:5", slot: 0, idempotencyKey: "key-biz-1" },
+    fn,
+  );
+  expect(result.ok).toBe(true);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].businessConnectionId).toBe("conn-1");
+});
+
+test("a disabled business connection fails cleanly and sends nothing", async () => {
+  saveMessage(BUSINESS_FIXTURE);
+  connectBusiness({ is_enabled: false });
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "888:5", slot: 0, idempotencyKey: "key-biz-2" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "business-unavailable" });
+  expect(calls).toHaveLength(0);
+  expect(getSend("key-biz-2")).toBeNull();
+});
+
+test("can_reply false fails cleanly and sends nothing", async () => {
+  saveMessage(BUSINESS_FIXTURE);
+  connectBusiness({ can_reply: false });
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "888:5", slot: 0, idempotencyKey: "key-biz-3" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "business-unavailable" });
+  expect(calls).toHaveLength(0);
+});
+
+test("a business message with no stored connection fails cleanly", async () => {
+  saveMessage(BUSINESS_FIXTURE);
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "888:5", slot: 0, idempotencyKey: "key-biz-4" },
+    fn,
+  );
+  expect(result).toEqual({ ok: false, code: "business-unavailable" });
+  expect(calls).toHaveLength(0);
+});
+
+test("an ordinary message still sends without a connection id", async () => {
+  const { fn, calls } = makeFake();
+  const result = await sendCanned(
+    { messageId: "-123:7", slot: 0, idempotencyKey: "key-plain-1" },
+    fn,
+  );
+  expect(result.ok).toBe(true);
+  expect(calls[0].businessConnectionId).toBeUndefined();
 });
 
 // --- sendText: the voice path resolves the text itself and
