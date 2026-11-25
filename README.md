@@ -12,7 +12,7 @@ Built for the [Even Realities hackathon](https://dorahacks.io/hackathon/even-rea
 
 ## What it does
 
-- **C2 — canned replies.** Five replies you edit from the phone panel. Three taps from the inbox to a sent message (open → pick → send), with a `Sent HH:MM` receipt. The send holds for 2 seconds first — tap again in that window to cancel, so a wrong tap never sends.
+- **C2 — canned replies.** Five replies you edit from the phone panel. Three taps from the inbox to a sent message (open → pick → send), with a `Sent HH:MM` receipt. The send holds for 2 seconds first — tap again in that window to cancel, so a wrong tap never sends. Each chat can also have its own five replies — a work group and family need different ones — and chats without a custom set use the all-chats five.
 - **Triage that respects attention.** Mark senders as VIP and their messages sort first in the inbox, even after they are read. Urgency keywords (default: `urgent`, `asap`, `down`, `failed` — editable from the phone panel) flag matching messages and pull them up too. Quiet hours hold ordinary messages on the server until the window ends; VIP and urgent messages still come through.
 - **Telegram Business replies.** Connect the bot as a business account's chatbot and replies to customer chats go out as the business account, not the bot. The phone panel shows the connection status; if the connection is gone or replies are paused, a send fails cleanly instead of going out as the wrong sender. Limitation: never tried live — no Telegram Business account exists here to connect the bot to, so this is fixture-tested only. The code is in place.
 - **C1 — voice replies.** Speak on the glasses mic; local faster-whisper (small.en) transcribes on the backend; the glasses show the transcript for review (`To <chat>:` + text) before anything is sent. Tap sends, swipe up edits on the phone, swipe down discards.
@@ -37,7 +37,7 @@ Telegram Bot API  (bot @quickreply_g2_bot, privacy mode off)
    +-- local faster-whisper (small.en, int8) for voice replies only
 ```
 
-- `apps/g2/` — the glasses app: an 8-screen state machine (Home, Inbox, Message, Reply menu, Recording, Transcript review, Receipt, Empty/error) plus the phone panel (reply editor + voice-reply editor + chat allowlist toggles + VIP senders + urgency keywords + quiet hours + Telegram Business status).
+- `apps/g2/` — the glasses app: an 8-screen state machine (Home, Inbox, Message, Reply menu, Recording, Transcript review, Receipt, Empty/error) plus the phone panel (reply editor, per chat or all chats, + voice-reply editor + chat allowlist toggles + VIP senders + urgency keywords + quiet hours + Telegram Business status).
 - `apps/server/` — the backend: Telegram poller (offset persisted in SQLite, dedupe by `update_id`), the message/reply/send-key stores, the send gate, the Whisper subprocess, and the WebSocket hub. The Telegram token never lives in the server: every Bot API call shells out to a helper (`TELEGRAM_HELPER_PATH`, defaulting to the vaulted-connector helper) that performs the credential exchange per call.
 - `apps/server/scripts/smoke-test.ts` — one command that boots the real server and drives the whole golden path over a real WebSocket (9 steps, fakes only at the Telegram/Whisper boundary).
 

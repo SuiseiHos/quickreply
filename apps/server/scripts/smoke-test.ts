@@ -13,6 +13,7 @@ import { createServer, createHub } from "../src/index.js";
 import {
   saveMessage,
   getSend,
+  recordKnownChat,
   type IncomingMessage,
 } from "../src/message-store.js";
 
@@ -83,6 +84,9 @@ async function main(): Promise<number> {
 
   try {
     saveMessage(FIXTURE);
+    // The poller records the chat as known when a message arrives;
+    // the fixture bypasses the poller, so record it the same way.
+    recordKnownChat(-123, "Ops");
 
     // 1. list-inbox returns the fixture + the 5 default replies.
     ws.send(JSON.stringify({ type: "list-inbox" }));
@@ -201,6 +205,40 @@ async function main(): Promise<number> {
       empty.type === "error" &&
         empty.code === "empty" &&
         empty.messageId === "-123:7",
+    );
+
+    // 9. Per-chat replies: a custom set for Ops, then a canned send
+    // uses the chat's text, not the global one.
+    ws.send(
+      JSON.stringify({
+        type: "set-chat-replies",
+        chat_id: -123,
+        replies: ["On it", "In a meeting", "Will check", "Yes", "No"],
+      }),
+    );
+    const chatRepliesUpdated = await next();
+    check(
+      "set-chat-replies broadcasts chat-replies-updated",
+      chatRepliesUpdated.type === "chat-replies-updated" &&
+        chatRepliesUpdated.chat_id === -123 &&
+        Array.isArray(chatRepliesUpdated.replies) &&
+        (chatRepliesUpdated.replies as string[])[0] === "On it",
+    );
+    ws.send(
+      JSON.stringify({
+        type: "send-canned",
+        messageId: "-123:7",
+        slot: 0,
+        idempotencyKey: "smoke-3",
+      }),
+    );
+    const receipt4 = await next();
+    check(
+      "send-canned with a custom set sends the chat's text",
+      receipt4.type === "receipt" &&
+        receipt4.text === "On it" &&
+        calls.length === 3 &&
+        calls[2].text === "On it",
     );
   } catch (err) {
     check("smoke test ran to completion", false, String(err));
