@@ -10,6 +10,8 @@ import {
   listChats,
   listInbox,
   listSenders,
+  setVip,
+  listVips,
   getOffset,
   setOffset,
   recordKnownChat,
@@ -61,6 +63,35 @@ test("listSenders returns distinct senders by id", () => {
 test("listSenders skips messages with no sender id", () => {
   saveMessage({ ...FIXTURE, sender_id: null });
   expect(listSenders()).toEqual([]);
+});
+
+test("setVip on an unknown sender returns false and changes nothing", () => {
+  expect(setVip(999, true)).toBe(false);
+  expect(listVips()).toEqual([]);
+});
+
+test("setVip round-trips through listVips", () => {
+  saveMessage(FIXTURE);
+  expect(setVip(555, true)).toBe(true);
+  expect(listVips()).toEqual([555]);
+  expect(setVip(555, false)).toBe(true);
+  expect(listVips()).toEqual([]);
+});
+
+test("listInbox puts a VIP message first even when it is already read", () => {
+  saveMessage(FIXTURE);
+  saveMessage({
+    ...FIXTURE,
+    id: "-123:8",
+    update_id: 1002,
+    sender_id: 777,
+    sender_name: "Budi",
+    text: "newer",
+    created_at: new Date(1795527600 * 1000).toISOString(),
+  });
+  setVip(555, true);
+  markRead("-123:7");
+  expect(listInbox().map((m) => m.id)).toEqual(["-123:7", "-123:8"]);
 });
 
 test("saveMessage stores a message and listInbox returns it", () => {

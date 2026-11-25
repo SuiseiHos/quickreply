@@ -11,10 +11,13 @@ import {
   getReplies,
   listInbox,
   listKnownChats,
+  listSenders,
+  listVips,
   markRead,
   seedAllowedFromMessages,
   setChatAllowed,
   setReplies,
+  setVip,
 } from "./message-store.js";
 import { sendCanned, sendText, type SendResult } from "./send.js";
 import { createAudioHandler, type TranscribeFn } from "./ws-audio.js";
@@ -120,14 +123,40 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
     if (typeof msg !== "object" || msg === null) return;
     const type = (msg as { type?: unknown }).type;
     if (type === "list-inbox") {
+      const vips = listVips();
       ws.send(
         JSON.stringify({
           type: "inbox",
           messages: listInbox(),
           replies: getReplies(),
           chats: listKnownChats(),
+          senders: listSenders().map((s) => ({
+            ...s,
+            vip: vips.includes(s.sender_id),
+          })),
+          vips,
         }),
       );
+    } else if (type === "set-vip") {
+      // Phone-panel VIP toggle: only the local panel can change it, and
+      // only for a sender the bot has already seen. An unknown sender id
+      // is rejected the same way an unknown chat is — forged or stale.
+      const senderId = (msg as { sender_id?: unknown }).sender_id;
+      const vip = (msg as { vip?: unknown }).vip;
+      if (typeof senderId !== "number" || typeof vip !== "boolean") return;
+      if (!setVip(senderId, vip)) {
+        ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
+        return;
+      }
+      const vips = listVips();
+      broadcast({
+        type: "vips-updated",
+        vips,
+        senders: listSenders().map((s) => ({
+          ...s,
+          vip: vips.includes(s.sender_id),
+        })),
+      });
     } else if (type === "set-chat-allowed") {
       // Phone-panel allowlist toggle: only the local panel can
       // change it, and only for a chat the bot has already seen. A toggle

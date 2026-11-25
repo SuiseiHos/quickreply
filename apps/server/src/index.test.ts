@@ -6,6 +6,7 @@ import { createServer, createHub } from "./index.js";
 import {
   saveMessage,
   listInbox,
+  listVips,
   recordKnownChat,
   isAllowedChat,
   setChatAllowed,
@@ -501,6 +502,66 @@ test("WS list-inbox carries the known chats with their allowed flags", async () 
         { chat_id: -456, chat_title: "Alerts", allowed: false },
         { chat_id: -123, chat_title: "Ops", allowed: true },
       ]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-vip updates the DB and broadcasts vips-updated", async () => {
+  saveMessage(FIXTURE);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "set-vip", sender_id: 555, vip: true }));
+      const msg = await pushed;
+      expect(msg.type).toBe("vips-updated");
+      expect(msg.vips).toEqual([555]);
+      expect(listVips()).toEqual([555]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-vip for an unknown sender replies unknown-chat", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "set-vip", sender_id: 999, vip: true }));
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("unknown-chat");
+      expect(listVips()).toEqual([]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-vip with a malformed payload is ignored, no crash", async () => {
+  saveMessage(FIXTURE);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      ws.send(JSON.stringify({ type: "set-vip", sender_id: "555", vip: "yes" }));
+      // The server must stay alive: a list-inbox right after still answers.
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg = await reply;
+      expect(msg.type).toBe("inbox");
+      expect(listVips()).toEqual([]);
     } finally {
       ws.close();
     }

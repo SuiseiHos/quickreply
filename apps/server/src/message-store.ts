@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rankInbox } from "./triage.js";
 
 export type IncomingMessage = {
   id: string;
@@ -76,6 +77,9 @@ function getDb(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS allowed_chats (
       chat_id INTEGER PRIMARY KEY,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS vip_senders (
+      sender_id INTEGER PRIMARY KEY
     );
   `);
   // Migration: sender_id arrived after the first messages were stored.
@@ -388,13 +392,43 @@ export function saveMessage(m: IncomingMessage): boolean {
 
 /** Inbox: unread first, then newest. */
 export function listInbox(): StoredMessage[] {
+  const rows = getDb().prepare("SELECT * FROM messages").all() as Record<
+    string,
+    unknown
+  >[];
+  // Ranking lives in triage.ts (VIP first, then unread, then newest) so
+  // the sort is one pure function the tests can pin, not SQL.
+  return rankInbox(rows.map(rowToMessage), listVips());
+}
+
+/** VIP senders, by Telegram user id. VIP is by id, never by name. */
+export function listVips(): number[] {
   const rows = getDb()
-    .prepare(
-      `SELECT * FROM messages
-       ORDER BY read ASC, created_at DESC, update_id DESC`,
-    )
-    .all() as Record<string, unknown>[];
-  return rows.map(rowToMessage);
+    .prepare("SELECT sender_id FROM vip_senders ORDER BY sender_id ASC")
+    .all() as { sender_id: number }[];
+  return rows.map((r) => Number(r.sender_id));
+}
+
+/**
+ * Sets VIP for a sender. Returns false when the sender is unknown — the
+ * id must have been seen in a stored message first, so a typo or a
+ * forged id can never create a VIP out of thin air.
+ */
+export function setVip(senderId: number, vip: boolean): boolean {
+  const known = getDb()
+    .prepare("SELECT 1 FROM messages WHERE sender_id = ? LIMIT 1")
+    .get(senderId);
+  if (!known) return false;
+  if (vip) {
+    getDb()
+      .prepare("INSERT OR IGNORE INTO vip_senders (sender_id) VALUES (?)")
+      .run(senderId);
+  } else {
+    getDb()
+      .prepare("DELETE FROM vip_senders WHERE sender_id = ?")
+      .run(senderId);
+  }
+  return true;
 }
 
 /** Next update_id the poller should ask Telegram for (0 = from the start). */
@@ -419,6 +453,6 @@ export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
   getDb().exec(
-    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats;",
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders;",
   );
 }

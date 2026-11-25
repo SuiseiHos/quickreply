@@ -28,7 +28,7 @@ import {
   type InboxMessage,
 } from "./screens";
 import { createUndoWindow, type UndoWindow } from "./undo";
-import { renderReplyPanel, setPanelStatus, type PanelChat } from "./phone-panel";
+import { renderReplyPanel, setPanelStatus, type PanelChat, type PanelSender } from "./phone-panel";
 
 const HOME_CONTAINER_ID = 1;
 const HOME_CONTAINER_NAME = "home";
@@ -76,6 +76,8 @@ let replies: string[] = [
 ];
 /** Chats the bot has seen, with their allowlist flags. */
 let chats: PanelChat[] = [];
+let senders: PanelSender[] = [];
+let vips: number[] = [];
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -126,7 +128,7 @@ function currentScreenText(): string {
     case "home":
       return homeScreen(unreadCount, latest);
     case "inbox":
-      return inboxScreen(messages, inboxSelected, inboxPageStart);
+      return inboxScreen(messages, inboxSelected, inboxPageStart, vips);
     case "message":
       return currentMessage
         ? messageScreen(currentMessage, messagePage)
@@ -176,12 +178,16 @@ function render(): void {
     onToggleChat: (chatId, allowed) => {
       sendToServer({ type: "set-chat-allowed", chat_id: chatId, allowed });
     },
+    onToggleVip: (senderId, vip) => {
+      sendToServer({ type: "set-vip", sender_id: senderId, vip });
+    },
   },
   // The phone panel shows the voice-reply editor only while a review
   // is active (or its too-long error is showing).
   (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
     ? { messageId: voiceMessage.id, text: reviewTranscript }
     : null,
+  { senders },
   );
 }
 
@@ -586,7 +592,7 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
@@ -596,6 +602,12 @@ function handleServerMessage(raw: string): void {
     if (Array.isArray(payload.chats)) {
       chats = payload.chats as PanelChat[];
     }
+    if (Array.isArray(payload.senders)) {
+      senders = payload.senders as PanelSender[];
+    }
+    if (Array.isArray(payload.vips)) {
+      vips = payload.vips as number[];
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
@@ -603,6 +615,15 @@ function handleServerMessage(raw: string): void {
   } else if (type === "chats-updated") {
     const next = (msg as { chats?: unknown }).chats;
     if (Array.isArray(next)) chats = next as PanelChat[];
+    render();
+  } else if (type === "vips-updated") {
+    const payload = msg as { senders?: unknown; vips?: unknown };
+    if (Array.isArray(payload.senders)) {
+      senders = payload.senders as PanelSender[];
+    }
+    if (Array.isArray(payload.vips)) {
+      vips = payload.vips as number[];
+    }
     render();
   } else if (type === "message") {
     const m = (msg as { message?: unknown }).message as InboxMessage;
@@ -660,6 +681,7 @@ function handleServerMessage(raw: string): void {
         id: t.messageId,
         chat_id: 0,
         chat_title: typeof t.chatTitle === "string" ? t.chatTitle : "",
+        sender_id: null,
         sender_name: "",
         text: "",
         created_at: "",

@@ -7,6 +7,8 @@ export type InboxMessage = {
   id: string;
   chat_id: number;
   chat_title: string;
+  /** Telegram user id of the sender (null for old rows without one). */
+  sender_id: number | null;
   sender_name: string;
   text: string;
   created_at: string;
@@ -103,6 +105,7 @@ export function inboxScreen(
   messages: InboxMessage[],
   selected: number,
   pageStart: number,
+  vips: number[] = [],
 ): string {
   if (messages.length === 0) {
     return ["No new messages", "", "Long-press = Home"].join("\n");
@@ -112,7 +115,9 @@ export function inboxScreen(
   page.forEach((m, i) => {
     const idx = pageStart + i;
     const marker = idx === selected ? ">" : " ";
-    const prefix = `${marker} ${idx + 1}. ${m.chat_title} — `;
+    const vipMark =
+      m.sender_id !== null && vips.includes(m.sender_id) ? "VIP " : "";
+    const prefix = `${marker} ${idx + 1}. ${vipMark}${m.chat_title} — `;
     const maxText = LIST_LINE_MAX - prefix.length;
     const text =
       firstLine(m.text).length > maxText && maxText > 3

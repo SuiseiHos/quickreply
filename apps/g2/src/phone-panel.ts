@@ -14,6 +14,8 @@ export type ReplyPanelCallbacks = {
   onSaveVoice?: (messageId: string, text: string) => void;
   /** User flipped a chat's allowlist toggle. */
   onToggleChat?: (chatId: number, allowed: boolean) => void;
+  /** User flipped a sender's VIP toggle. */
+  onToggleVip?: (senderId: number, vip: boolean) => void;
 };
 
 /** A chat the bot has seen, with its allowlist flag. */
@@ -21,6 +23,13 @@ export type PanelChat = {
   chat_id: number;
   chat_title: string;
   allowed: boolean;
+};
+
+/** A sender the bot has seen, with its VIP flag. */
+export type PanelSender = {
+  sender_id: number;
+  sender_name: string;
+  vip: boolean;
 };
 
 /** A voice reply under review on the glasses. */
@@ -144,11 +153,13 @@ export function renderReplyPanel(
   chats: PanelChat[],
   cb: ReplyPanelCallbacks,
   voice?: VoiceReply | null,
+  opts?: { senders?: PanelSender[] },
 ): void {
   ensurePanelStyles();
   const appEl = document.querySelector<HTMLDivElement>("#app");
   if (!appEl) return;
-  const signature = JSON.stringify({ replies, chats, voice });
+  const senders = opts?.senders ?? [];
+  const signature = JSON.stringify({ replies, chats, voice, senders });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -224,6 +235,37 @@ export function renderReplyPanel(
   }
   chatsCard.append(chatList);
   root.append(chatsCard);
+
+  const vipCard = el("section", "qr-card");
+  vipCard.id = "qr-vips";
+  vipCard.append(
+    el("h2", "qr-card-title", "VIP senders"),
+    el(
+      "p",
+      "qr-card-help",
+      "VIP senders always come first in the inbox, even when their message is already read.",
+    ),
+  );
+  const vipList = el("div", "qr-chats");
+  if (senders.length === 0) {
+    vipList.append(el("p", "qr-empty", "No senders yet"));
+  }
+  for (const sender of senders) {
+    const row = el("label", "qr-chat-row qr-vip-row") as HTMLLabelElement;
+    const box = el("input", "qr-toggle") as HTMLInputElement;
+    box.type = "checkbox";
+    box.checked = sender.vip;
+    box.setAttribute("aria-label", `VIP ${sender.sender_name}`);
+    box.addEventListener("change", () => {
+      cb.onToggleVip?.(sender.sender_id, box.checked);
+    });
+    const track = el("span", "qr-toggle-ui");
+    const name = el("span", "qr-chat-name qr-vip-name", sender.sender_name);
+    row.append(box, track, name);
+    vipList.append(row);
+  }
+  vipCard.append(vipList);
+  root.append(vipCard);
 
   if (voice && cb.onSaveVoice) {
     const voiceCard = el("section", "qr-card");

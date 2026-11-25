@@ -52,6 +52,7 @@ const INBOX_MSG = {
   update_id: 1001,
   chat_id: -123,
   chat_title: "Ops",
+  sender_id: 555,
   sender_name: "Ani",
   text: "hello from the group",
   created_at: new Date(1795524000 * 1000).toISOString(),
@@ -82,6 +83,16 @@ test("inboxScreen lists 5 rows per page with the selected row marked", () => {
       "Long-press = Home",
     ].join("\n"),
   );
+});
+
+test("inboxScreen prefixes a VIP sender's row with VIP", () => {
+  const messages = [
+    INBOX_MSG,
+    { ...INBOX_MSG, id: "-123:8", update_id: 1002, sender_id: 777, sender_name: "Budi", text: "from budi" },
+  ];
+  const screen = inboxScreen(messages, 0, 0, [555]);
+  expect(screen.split("\n")[2]).toBe("> 1. VIP Ops — hello from the group");
+  expect(screen.split("\n")[3]).toBe("  2. Ops — from budi");
 });
 
 test("inboxScreen truncates a long first line to 64 chars", () => {
@@ -270,6 +281,7 @@ test("no screen line exceeds 64 chars with a long chat title", () => {
     id: "-123:7",
     chat_id: -123,
     chat_title: longTitle,
+    sender_id: 555,
     sender_name: "Ani",
     text: "B".repeat(200),
     created_at: "2026-11-24T13:00:00.000Z",

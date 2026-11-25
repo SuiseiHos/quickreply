@@ -5,6 +5,7 @@ import {
   setPanelStatus,
   __clearPanelForTests,
   type PanelChat,
+  type PanelSender,
   type ReplyPanelCallbacks,
 } from "./phone-panel";
 
@@ -13,16 +14,22 @@ const CHATS: PanelChat[] = [
   { chat_id: -1, chat_title: "Ops", allowed: true },
   { chat_id: -2, chat_title: "New group", allowed: false },
 ];
+const SENDERS: PanelSender[] = [
+  { sender_id: 555, sender_name: "Ani", vip: true },
+  { sender_id: 777, sender_name: "Budi", vip: false },
+];
 
 function callbacks(): ReplyPanelCallbacks & {
   onSave: ReturnType<typeof vi.fn>;
   onSaveVoice: ReturnType<typeof vi.fn>;
   onToggleChat: ReturnType<typeof vi.fn>;
+  onToggleVip: ReturnType<typeof vi.fn>;
 } {
   return {
     onSave: vi.fn(),
     onSaveVoice: vi.fn(),
     onToggleChat: vi.fn(),
+    onToggleVip: vi.fn(),
   };
 }
 
@@ -71,6 +78,29 @@ describe("renderReplyPanel", () => {
     toggles[1].checked = true;
     toggles[1].dispatchEvent(new Event("change", { bubbles: true }));
     expect(cb.onToggleChat).toHaveBeenCalledWith(-2, true);
+  });
+
+  it("renders VIP toggles for known senders, checked for VIPs", () => {
+    renderReplyPanel(REPLIES, CHATS, callbacks(), null, { senders: SENDERS });
+    const toggles = [
+      ...document.querySelectorAll(".qr-vip-row .qr-toggle"),
+    ] as HTMLInputElement[];
+    expect(toggles).toHaveLength(2);
+    expect(toggles[0].checked).toBe(true);
+    expect(toggles[0].getAttribute("aria-label")).toContain("Ani");
+    expect(toggles[1].checked).toBe(false);
+    expect(document.querySelector(".qr-vip-name")?.textContent).toBe("Ani");
+  });
+
+  it("flipping a VIP toggle calls onToggleVip with the sender id and new state", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, { senders: SENDERS });
+    const toggles = [
+      ...document.querySelectorAll(".qr-vip-row .qr-toggle"),
+    ] as HTMLInputElement[];
+    toggles[1].checked = true;
+    toggles[1].dispatchEvent(new Event("change", { bubbles: true }));
+    expect(cb.onToggleVip).toHaveBeenCalledWith(777, true);
   });
 
   it("saves trimmed replies and rejects an empty slot without calling onSave", () => {
