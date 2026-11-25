@@ -18,8 +18,23 @@ export type IncomingMessage = {
    * VIP matching uses this, never the display name. */
   sender_id: number | null;
   sender_name: string;
+  /** Business connection id for messages that arrived as
+   * `business_message` (null for ordinary bot messages). A reply to such
+   * a message is sent with this id, so it appears as sent by the
+   * business account. */
+  business_connection_id: string | null;
   text: string;
   created_at: string;
+};
+
+/** One Telegram Business connection: the bot connected as a business
+ * account's chatbot. At most one per business account; the bot can hold
+ * several (one per account that connected it). */
+export type BusinessConnection = {
+  id: string;
+  user_chat_id: number;
+  can_reply: boolean;
+  is_enabled: boolean;
 };
 
 export type StoredMessage = IncomingMessage & { read: number };
@@ -86,6 +101,13 @@ function getDb(): DatabaseSync {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS business_connections (
+      id TEXT PRIMARY KEY,
+      user_chat_id INTEGER NOT NULL,
+      can_reply INTEGER NOT NULL DEFAULT 0,
+      is_enabled INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
   `);
   // Migration: sender_id arrived after the first messages were stored.
   // ALTER is idempotent here — it runs only when the column is missing,
@@ -95,6 +117,12 @@ function getDb(): DatabaseSync {
     .all() as { name: string }[];
   if (!columns.some((c) => c.name === "sender_id")) {
     db.exec("ALTER TABLE messages ADD COLUMN sender_id INTEGER");
+  }
+  // Migration: business_connection_id arrived with Telegram Business
+  // support. Same idempotent pattern; old rows keep NULL (ordinary bot
+  // messages).
+  if (!columns.some((c) => c.name === "business_connection_id")) {
+    db.exec("ALTER TABLE messages ADD COLUMN business_connection_id TEXT");
   }
   return db;
 }
@@ -352,6 +380,11 @@ function rowToMessage(row: Record<string, unknown>): StoredMessage {
         ? null
         : Number(row.sender_id),
     sender_name: String(row.sender_name),
+    business_connection_id:
+      row.business_connection_id === null ||
+      row.business_connection_id === undefined
+        ? null
+        : String(row.business_connection_id),
     text: String(row.text),
     created_at: String(row.created_at),
     read: Number(row.read),
@@ -379,8 +412,8 @@ export function saveMessage(m: IncomingMessage): boolean {
   const result = getDb()
     .prepare(
       `INSERT OR IGNORE INTO messages
-         (id, update_id, chat_id, chat_title, sender_id, sender_name, text, created_at, read)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+         (id, update_id, chat_id, chat_title, sender_id, sender_name, business_connection_id, text, created_at, read)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     )
     .run(
       m.id,
@@ -389,10 +422,64 @@ export function saveMessage(m: IncomingMessage): boolean {
       m.chat_title,
       m.sender_id ?? null,
       m.sender_name,
+      m.business_connection_id ?? null,
       m.text,
       m.created_at,
     );
   return result.changes === 1;
+}
+
+/**
+ * Records a Telegram Business connection (upsert by id — Telegram sends
+ * the same update whenever the connection changes, e.g. the owner
+ * disconnects the bot or `can_reply` flips after 24h of silence).
+ */
+export function setBusinessConnection(conn: BusinessConnection): void {
+  getDb()
+    .prepare(
+      `INSERT INTO business_connections
+         (id, user_chat_id, can_reply, is_enabled, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         user_chat_id = excluded.user_chat_id,
+         can_reply = excluded.can_reply,
+         is_enabled = excluded.is_enabled,
+         updated_at = excluded.updated_at`,
+    )
+    .run(
+      conn.id,
+      conn.user_chat_id,
+      conn.can_reply ? 1 : 0,
+      conn.is_enabled ? 1 : 0,
+      new Date().toISOString(),
+    );
+}
+
+/** One stored business connection by id, or null (never connected). */
+export function getBusinessConnection(id: string): BusinessConnection | null {
+  const row = getDb()
+    .prepare("SELECT * FROM business_connections WHERE id = ?")
+    .get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    user_chat_id: Number(row.user_chat_id),
+    can_reply: Number(row.can_reply) === 1,
+    is_enabled: Number(row.is_enabled) === 1,
+  };
+}
+
+/** Every stored business connection, by id. Usually zero or one. */
+export function listBusinessConnections(): BusinessConnection[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM business_connections ORDER BY id ASC")
+    .all() as Record<string, unknown>[];
+  return rows.map((row) => ({
+    id: String(row.id),
+    user_chat_id: Number(row.user_chat_id),
+    can_reply: Number(row.can_reply) === 1,
+    is_enabled: Number(row.is_enabled) === 1,
+  }));
 }
 
 /** Inbox: unread first, then newest. */
@@ -537,6 +624,6 @@ export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
   getDb().exec(
-    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders; DELETE FROM settings;",
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders; DELETE FROM settings; DELETE FROM business_connections;",
   );
 }

@@ -23,6 +23,9 @@ import {
   setChatAllowed,
   listKnownChats,
   seedAllowedFromMessages,
+  setBusinessConnection,
+  getBusinessConnection,
+  listBusinessConnections,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -39,6 +42,7 @@ const FIXTURE: IncomingMessage = {
   chat_title: "Ops",
   sender_id: 555,
   sender_name: "Ani",
+  business_connection_id: null,
   text: "hello from the group",
   created_at: new Date(1795524000 * 1000).toISOString(),
 };
@@ -172,6 +176,54 @@ test("listInbox orders unread first, then newest", () => {
   saveMessage(FIXTURE);
   const inbox = listInbox();
   expect(inbox.map((m) => m.update_id)).toEqual([1003, 1001, 999]);
+});
+
+test("business connections round-trip, and an upsert updates can_reply/is_enabled", () => {
+  expect(listBusinessConnections()).toEqual([]);
+  expect(getBusinessConnection("conn-1")).toBeNull();
+  setBusinessConnection({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: true,
+    is_enabled: true,
+  });
+  expect(getBusinessConnection("conn-1")).toEqual({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: true,
+    is_enabled: true,
+  });
+  expect(listBusinessConnections()).toHaveLength(1);
+  // Owner disconnects the bot: the same id upserts to disabled.
+  setBusinessConnection({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: false,
+    is_enabled: false,
+  });
+  expect(getBusinessConnection("conn-1")).toEqual({
+    id: "conn-1",
+    user_chat_id: 777,
+    can_reply: false,
+    is_enabled: false,
+  });
+  expect(listBusinessConnections()).toHaveLength(1);
+});
+
+test("a message with a business connection id round-trips through save/get", () => {
+  const business = {
+    ...FIXTURE,
+    id: "777:3",
+    update_id: 1002,
+    chat_id: 777,
+    chat_title: "Customer",
+    business_connection_id: "conn-1",
+  };
+  expect(saveMessage(business)).toBe(true);
+  expect(getMessage("777:3")?.business_connection_id).toBe("conn-1");
+  // And a normal message still reads back null.
+  saveMessage(FIXTURE);
+  expect(getMessage("-123:7")?.business_connection_id).toBeNull();
 });
 
 test("offset persists: setOffset then getOffset round-trips", () => {

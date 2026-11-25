@@ -12,6 +12,7 @@ function msg(over: Partial<StoredMessage> & { id: string }): StoredMessage {
     chat_title: "Ops",
     sender_id: null,
     sender_name: "A",
+    business_connection_id: null,
     text: "hi",
     created_at: "2026-11-25T00:00:00.000Z",
     read: 0,
