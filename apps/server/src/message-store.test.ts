@@ -1,6 +1,7 @@
 import { beforeEach, test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   saveMessage,
   getReplies,
@@ -285,6 +286,40 @@ test("listChatReplies returns only chats with a full custom set", () => {
   const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
   setChatReplies(-123, work);
   expect(listChatReplies()).toEqual([{ chat_id: -123, replies: work }]);
+});
+
+test("setReplies and setChatReplies reject non-string elements without crashing", () => {
+  recordKnownChat(-123, "Ops");
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  setChatReplies(-123, work);
+  expect(setChatReplies(-123, [1, 2, 3, 4, 5] as unknown as string[])).toBe(
+    false,
+  );
+  expect(getRepliesForChat(-123)).toEqual(work);
+  expect(setReplies([1, 2, 3, 4, 5] as unknown as string[])).toBe(false);
+  expect(getReplies()).toEqual([
+    "On my way",
+    "Noted, will check",
+    "Can't talk now",
+    "Yes",
+    "No",
+  ]);
+});
+
+test("a partial chat set behaves as no custom set", () => {
+  // A crash between upserts could leave fewer than 5 rows; the readers
+  // must fall back to global instead of serving a partial set.
+  recordKnownChat(-123, "Ops");
+  const db = new DatabaseSync(process.env.QUICKREPLY_DB_PATH as string);
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    "INSERT INTO chat_replies (chat_id, slot, text, updated_at) VALUES (?, ?, ?, ?)",
+  );
+  insert.run(-123, 1, "On it", now);
+  insert.run(-123, 2, "In a meeting", now);
+  expect(getRepliesForChat(-123)).toEqual(getReplies());
+  expect(hasChatReplies(-123)).toBe(false);
+  expect(listChatReplies()).toEqual([]);
 });
 
 test("offset persists: setOffset then getOffset round-trips", () => {

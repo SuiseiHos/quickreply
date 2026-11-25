@@ -326,6 +326,64 @@ test("WS clear-chat-replies deletes the set and broadcasts null", async () => {
   }
 });
 
+test("WS set-chat-replies with non-string elements returns bad-replies and the server stays alive", async () => {
+  recordKnownChat(-123, "Ops");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "set-chat-replies",
+          chat_id: -123,
+          replies: [1, 2, 3, 4, 5],
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-replies");
+      expect(hasChatReplies(-123)).toBe(false);
+      // The server is still alive: list-inbox answers.
+      const inboxReply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const inbox = await inboxReply;
+      expect(inbox.type).toBe("inbox");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS update-replies with non-string elements returns bad-replies and the server stays alive", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "update-replies",
+          replies: [1, 2, 3, 4, 5],
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-replies");
+      const inboxReply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const inbox = await inboxReply;
+      expect(inbox.type).toBe("inbox");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
 test("WS update-replies saves 5 replies and broadcasts replies-updated", async () => {
   const { server, port } = await boot();
   try {

@@ -134,6 +134,27 @@ function getDb(): DatabaseSync {
   return db;
 }
 
+/**
+ * Runs fn inside one transaction; rolls back and rethrows on error.
+ * node:sqlite has no .transaction() helper (unlike better-sqlite3), so
+ * this is manual BEGIN/COMMIT. Used where a multi-row write must be
+ * all-or-nothing — a crash between slots must never leave a partial set.
+ */
+function inTransaction(database: DatabaseSync, fn: () => void): void {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    fn();
+    database.exec("COMMIT");
+  } catch (err) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // Already rolled back (e.g. the error came from COMMIT itself).
+    }
+    throw err;
+  }
+}
+
 const DEFAULT_REPLIES = [
   "On my way",
   "Noted, will check",
@@ -177,6 +198,10 @@ export function getReplies(): string[] {
  */
 export function setReplies(texts: string[]): boolean {
   if (texts.length !== 5) return false;
+  // A WS payload is untyped JSON: a non-string element would crash on
+  // .trim() below and take the whole server down with it (the handler
+  // has no try/catch around the store call). Reject it here instead.
+  if (texts.some((t) => typeof t !== "string")) return false;
   const trimmed = texts.map((t) => t.trim());
   if (trimmed.some((t) => t.length === 0 || t.length > 64)) return false;
   const database = getDb();
@@ -188,14 +213,17 @@ export function setReplies(texts: string[]): boolean {
      ON CONFLICT(slot) DO UPDATE SET text = excluded.text,
        updated_at = excluded.updated_at`,
   );
-  trimmed.forEach((text, i) => upsert.run(i + 1, text, now));
+  // One transaction: a crash between slots must never leave a partial set.
+  inTransaction(database, () => {
+    trimmed.forEach((text, i) => upsert.run(i + 1, text, now));
+  });
   return true;
 }
 
 /**
- * The 5 canned replies for one chat: the chat's own set when it has one,
- * else the global set. A set is always saved as all 5, so "any row
- * exists" means "a full set exists" — there is no partial state.
+ * The 5 canned replies for one chat: the chat's own set when it has a
+ * full set of 5, else the global set. A partial set (fewer than 5 rows —
+ * only reachable if a write crashed mid-way) behaves as no custom set.
  */
 export function getRepliesForChat(chatId: number): string[] {
   const rows = getDb()
@@ -203,16 +231,16 @@ export function getRepliesForChat(chatId: number): string[] {
       "SELECT text FROM chat_replies WHERE chat_id = ? ORDER BY slot ASC",
     )
     .all(chatId) as { text: string }[];
-  if (rows.length === 0) return getReplies();
+  if (rows.length !== 5) return getReplies();
   return rows.map((r) => r.text);
 }
 
-/** True when the chat has its own reply set (rather than the global one). */
+/** True when the chat has a full 5-slot reply set (a partial set counts as none). */
 export function hasChatReplies(chatId: number): boolean {
   const row = getDb()
-    .prepare("SELECT 1 FROM chat_replies WHERE chat_id = ? LIMIT 1")
-    .get(chatId);
-  return row !== undefined;
+    .prepare("SELECT COUNT(*) AS n FROM chat_replies WHERE chat_id = ?")
+    .get(chatId) as { n: number };
+  return row.n === 5;
 }
 
 /**
@@ -224,6 +252,9 @@ export function hasChatReplies(chatId: number): boolean {
 export function setChatReplies(chatId: number, texts: string[]): boolean {
   if (!isKnownChat(chatId)) return false;
   if (texts.length !== 5) return false;
+  // Same guard as setReplies: a WS payload is untyped JSON, and a
+  // non-string element would crash on .trim() and kill the server.
+  if (texts.some((t) => typeof t !== "string")) return false;
   const trimmed = texts.map((t) => t.trim());
   if (trimmed.some((t) => t.length === 0 || t.length > 64)) return false;
   const database = getDb();
@@ -234,7 +265,10 @@ export function setChatReplies(chatId: number, texts: string[]): boolean {
      ON CONFLICT(chat_id, slot) DO UPDATE SET text = excluded.text,
        updated_at = excluded.updated_at`,
   );
-  trimmed.forEach((text, i) => upsert.run(chatId, i + 1, text, now));
+  // One transaction: a crash between slots must never leave a partial set.
+  inTransaction(database, () => {
+    trimmed.forEach((text, i) => upsert.run(chatId, i + 1, text, now));
+  });
   return true;
 }
 
