@@ -38,10 +38,25 @@ test("parseUpdate converts a group text message", () => {
     update_id: 1001,
     chat_id: -123,
     chat_title: "Ops",
+    sender_id: 555,
     sender_name: "Ani Putri",
     text: "hello from the group",
     created_at: new Date(1795524000 * 1000).toISOString(),
   });
+});
+
+test("parseUpdate sets sender_id null when the sender has no id", () => {
+  const update = {
+    update_id: 1004,
+    message: {
+      message_id: 9,
+      date: 1795524000,
+      chat: { id: -123, title: "Ops", type: "group" },
+      from: { first_name: "NoId" },
+      text: "hello",
+    },
+  };
+  expect(parseUpdate(update)?.sender_id).toBeNull();
 });
 
 test("parseUpdate uses the sender name as chat title for a private chat", () => {

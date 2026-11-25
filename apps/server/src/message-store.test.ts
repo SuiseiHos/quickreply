@@ -9,6 +9,7 @@ import {
   getMessage,
   listChats,
   listInbox,
+  listSenders,
   getOffset,
   setOffset,
   recordKnownChat,
@@ -30,6 +31,7 @@ const FIXTURE: IncomingMessage = {
   update_id: 1001,
   chat_id: -123,
   chat_title: "Ops",
+  sender_id: 555,
   sender_name: "Ani",
   text: "hello from the group",
   created_at: new Date(1795524000 * 1000).toISOString(),
@@ -37,6 +39,28 @@ const FIXTURE: IncomingMessage = {
 
 beforeEach(() => {
   __clearAllForTests();
+});
+
+test("listSenders returns distinct senders by id", () => {
+  saveMessage(FIXTURE);
+  saveMessage({ ...FIXTURE, id: "-123:8", update_id: 1002, text: "again" });
+  saveMessage({
+    ...FIXTURE,
+    id: "-123:9",
+    update_id: 1003,
+    sender_id: 777,
+    sender_name: "Budi",
+    text: "hi",
+  });
+  expect(listSenders()).toEqual([
+    { sender_id: 555, sender_name: "Ani" },
+    { sender_id: 777, sender_name: "Budi" },
+  ]);
+});
+
+test("listSenders skips messages with no sender id", () => {
+  saveMessage({ ...FIXTURE, sender_id: null });
+  expect(listSenders()).toEqual([]);
 });
 
 test("saveMessage stores a message and listInbox returns it", () => {

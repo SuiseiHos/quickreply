@@ -12,6 +12,9 @@ export type IncomingMessage = {
   update_id: number;
   chat_id: number;
   chat_title: string;
+  /** Telegram user id of the sender (null when the update has none).
+   * VIP matching uses this, never the display name. */
+  sender_id: number | null;
   sender_name: string;
   text: string;
   created_at: string;
@@ -75,6 +78,15 @@ function getDb(): DatabaseSync {
       created_at TEXT NOT NULL
     );
   `);
+  // Migration: sender_id arrived after the first messages were stored.
+  // ALTER is idempotent here — it runs only when the column is missing,
+  // so old databases (whose rows keep sender_id NULL) keep working.
+  const columns = db
+    .prepare("PRAGMA table_info(messages)")
+    .all() as { name: string }[];
+  if (!columns.some((c) => c.name === "sender_id")) {
+    db.exec("ALTER TABLE messages ADD COLUMN sender_id INTEGER");
+  }
   return db;
 }
 
@@ -326,6 +338,10 @@ function rowToMessage(row: Record<string, unknown>): StoredMessage {
     update_id: Number(row.update_id),
     chat_id: Number(row.chat_id),
     chat_title: String(row.chat_title),
+    sender_id:
+      row.sender_id === null || row.sender_id === undefined
+        ? null
+        : Number(row.sender_id),
     sender_name: String(row.sender_name),
     text: String(row.text),
     created_at: String(row.created_at),
@@ -333,19 +349,36 @@ function rowToMessage(row: Record<string, unknown>): StoredMessage {
   };
 }
 
+/** Every distinct sender seen in stored messages, by name.
+ * Senders with no id are skipped — VIP matching needs an id. */
+export function listSenders(): { sender_id: number; sender_name: string }[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT sender_id, sender_name FROM messages
+       WHERE sender_id IS NOT NULL
+       ORDER BY sender_name ASC`,
+    )
+    .all() as { sender_id: number; sender_name: string }[];
+  return rows.map((r) => ({
+    sender_id: Number(r.sender_id),
+    sender_name: String(r.sender_name),
+  }));
+}
+
 /** Stores a message; returns false when its update_id is already stored. */
 export function saveMessage(m: IncomingMessage): boolean {
   const result = getDb()
     .prepare(
       `INSERT OR IGNORE INTO messages
-         (id, update_id, chat_id, chat_title, sender_name, text, created_at, read)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+         (id, update_id, chat_id, chat_title, sender_id, sender_name, text, created_at, read)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     )
     .run(
       m.id,
       m.update_id,
       m.chat_id,
       m.chat_title,
+      m.sender_id,
       m.sender_name,
       m.text,
       m.created_at,

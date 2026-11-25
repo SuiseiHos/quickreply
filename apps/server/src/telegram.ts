@@ -148,12 +148,13 @@ export function parseUpdate(update: unknown): IncomingMessage | null {
   if (!m || typeof m !== "object") return null;
   if (typeof m.text !== "string" || m.text.length === 0) return null;
   const from = m.from as
-    | { first_name?: unknown; last_name?: unknown; is_bot?: unknown }
+    | { id?: unknown; first_name?: unknown; last_name?: unknown; is_bot?: unknown }
     | undefined;
   if (from?.is_bot === true) return null;
   const chat = m.chat as { id?: unknown; title?: unknown } | undefined;
   if (!chat || typeof chat.id !== "number") return null;
   if (typeof m.message_id !== "number") return null;
+  const senderId = typeof from?.id === "number" ? from.id : null;
   const senderName =
     [from?.first_name, from?.last_name]
       .filter((part): part is string => typeof part === "string")
@@ -166,6 +167,7 @@ export function parseUpdate(update: unknown): IncomingMessage | null {
     update_id: u.update_id,
     chat_id: chat.id,
     chat_title: chatTitle,
+    sender_id: senderId,
     sender_name: senderName,
     text: m.text,
     created_at: new Date(dateSeconds * 1000).toISOString(),
