@@ -5,6 +5,7 @@ import {
   setPanelStatus,
   __clearPanelForTests,
   type PanelChat,
+  type PanelChatReplies,
   type PanelSender,
   type ReplyPanelCallbacks,
 } from "./phone-panel";
@@ -26,6 +27,8 @@ function callbacks(): ReplyPanelCallbacks & {
   onToggleVip: ReturnType<typeof vi.fn>;
   onSaveKeywords: ReturnType<typeof vi.fn>;
   onSaveQuietHours: ReturnType<typeof vi.fn>;
+  onSaveChatReplies: ReturnType<typeof vi.fn>;
+  onClearChatReplies: ReturnType<typeof vi.fn>;
 } {
   return {
     onSave: vi.fn(),
@@ -34,7 +37,32 @@ function callbacks(): ReplyPanelCallbacks & {
     onToggleVip: vi.fn(),
     onSaveKeywords: vi.fn(),
     onSaveQuietHours: vi.fn(),
+    onSaveChatReplies: vi.fn(),
+    onClearChatReplies: vi.fn(),
   };
+}
+
+const WORK = ["On it", "In a meeting", "Will check", "Yes", "No"];
+const CHAT_REPLIES: PanelChatReplies[] = [{ chat_id: -1, replies: WORK }];
+
+function scopeSelect(): HTMLSelectElement {
+  return document.querySelector("#qr-replies-scope") as HTMLSelectElement;
+}
+
+function selectScope(value: string): void {
+  const select = scopeSelect();
+  select.value = value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function saveButton(): HTMLButtonElement {
+  return document.querySelectorAll(
+    "#qr-replies-card .qr-btn",
+  )[0] as HTMLButtonElement;
+}
+
+function resetButton(): HTMLButtonElement | null {
+  return document.querySelector("#qr-replies-reset") as HTMLButtonElement | null;
 }
 
 function inputs(): HTMLInputElement[] {
@@ -57,6 +85,78 @@ describe("renderReplyPanel", () => {
       "Reply 1",
     );
     expect(document.querySelector(".qr-btn")?.textContent).toBe("Save replies");
+  });
+
+  it("renders a scope selector with All chats plus one option per chat", () => {
+    renderReplyPanel(REPLIES, CHATS, callbacks(), null, {
+      chatReplies: CHAT_REPLIES,
+    });
+    const options = [...scopeSelect().options].map((o) => o.textContent);
+    expect(options).toEqual(["All chats", "Ops", "New group"]);
+    expect(scopeSelect().value).toBe("");
+    expect(resetButton()).toBe(null);
+  });
+
+  it("selecting a chat shows that chat's replies in the inputs", () => {
+    renderReplyPanel(REPLIES, CHATS, callbacks(), null, {
+      chatReplies: CHAT_REPLIES,
+    });
+    selectScope("-1");
+    expect(inputs().map((i) => i.value)).toEqual(WORK);
+  });
+
+  it("selecting a chat without a custom set starts from the global replies", () => {
+    renderReplyPanel(REPLIES, CHATS, callbacks(), null, {
+      chatReplies: CHAT_REPLIES,
+    });
+    selectScope("-2");
+    expect(inputs().map((i) => i.value)).toEqual(REPLIES);
+  });
+
+  it("saving while a chat is selected calls onSaveChatReplies with the chat id", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, { chatReplies: CHAT_REPLIES });
+    selectScope("-1");
+    inputs()[0].value = "On it now";
+    saveButton().click();
+    expect(cb.onSaveChatReplies).toHaveBeenCalledWith(-1, [
+      "On it now",
+      "In a meeting",
+      "Will check",
+      "Yes",
+      "No",
+    ]);
+    expect(cb.onSave).not.toHaveBeenCalled();
+  });
+
+  it("saving while All chats is selected still calls onSave", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, { chatReplies: CHAT_REPLIES });
+    saveButton().click();
+    expect(cb.onSave).toHaveBeenCalledWith(REPLIES);
+    expect(cb.onSaveChatReplies).not.toHaveBeenCalled();
+  });
+
+  it("the reset button appears only for a chat with a custom set and calls onClearChatReplies", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, { chatReplies: CHAT_REPLIES });
+    selectScope("-1");
+    expect(resetButton()?.textContent).toBe("Reset to all-chats replies");
+    resetButton()?.click();
+    expect(cb.onClearChatReplies).toHaveBeenCalledWith(-1);
+  });
+
+  it("an inbox re-render does not reset the selected scope mid-edit", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, { chatReplies: CHAT_REPLIES });
+    selectScope("-1");
+    inputs()[0].value = "On it now";
+    // Same args again, as an inbox update would do: the scope stays on
+    // the chat and the text being typed is not wiped.
+    renderReplyPanel(REPLIES, CHATS, cb, null, { chatReplies: CHAT_REPLIES });
+    expect(scopeSelect().value).toBe("-1");
+    expect(inputs()[0].value).toBe("On it now");
+    expect(inputs().slice(1).map((i) => i.value)).toEqual(WORK.slice(1));
   });
 
   it("renders chat toggles checked for allowed chats and a Pending badge otherwise", () => {

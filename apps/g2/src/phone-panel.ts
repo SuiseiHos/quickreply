@@ -20,6 +20,10 @@ export type ReplyPanelCallbacks = {
   onSaveKeywords?: (keywords: string) => void;
   /** User saved the quiet-hours window (both null turns it off). */
   onSaveQuietHours?: (start: string | null, end: string | null) => void;
+  /** User saved a chat's own 5 replies (selected in the scope selector). */
+  onSaveChatReplies?: (chatId: number, replies: string[]) => void;
+  /** User reset a chat to the all-chats replies. */
+  onClearChatReplies?: (chatId: number) => void;
 };
 
 /** A chat the bot has seen, with its allowlist flag. */
@@ -34,6 +38,12 @@ export type PanelChat = {
   chat_id: number;
   chat_title: string;
   allowed: boolean;
+};
+
+/** A chat's own 5 canned replies (chats without one use the global set). */
+export type PanelChatReplies = {
+  chat_id: number;
+  replies: string[];
 };
 
 /** A sender the bot has seen, with its VIP flag. */
@@ -53,11 +63,29 @@ export type VoiceReply = {
 let statusEl: HTMLParagraphElement | null = null;
 /** Last rendered inputs, so a re-render does not wipe text being typed. */
 let lastRendered: string | null = null;
+/** The chat the replies editor is scoped to (null = all chats). */
+let selectedReplyChat: number | null = null;
+/** Args of the last render, so the scope selector can re-render in place. */
+let lastPanelArgs: {
+  replies: string[];
+  chats: PanelChat[];
+  cb: ReplyPanelCallbacks;
+  voice?: VoiceReply | null;
+  opts?: {
+    senders?: PanelSender[];
+    keywords?: string[];
+    quietHours?: { start: string; end: string } | null;
+    businessConnections?: PanelBusinessConnection[];
+    chatReplies?: PanelChatReplies[];
+  };
+} | null = null;
 
 /** Test-only: forget the last render so the next render rebuilds the DOM. */
 export function __clearPanelForTests(): void {
   lastRendered = null;
   statusEl = null;
+  selectedReplyChat = null;
+  lastPanelArgs = null;
 }
 
 const PANEL_STYLE_ID = "qr-panel-style";
@@ -73,13 +101,15 @@ body { margin: 0; background: #0f172a; }
 .qr-card-help { margin: 0 0 16px; color: #94a3b8; font-size: 13px; }
 .qr-fields { display: grid; gap: 12px; }
 .qr-label { display: block; font-size: 13px; font-weight: 600; color: #cbd5e1; margin-bottom: 6px; }
-.qr-input, .qr-textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; color: #f8fafc; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 11px 12px; outline: none; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; }
-.qr-input:focus, .qr-textarea:focus { border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.25); }
+.qr-input, .qr-textarea, .qr-select { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; color: #f8fafc; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 11px 12px; outline: none; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; }
+.qr-input:focus, .qr-textarea:focus, .qr-select:focus { border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.25); }
 .qr-textarea { min-height: 96px; resize: vertical; }
 .qr-btn { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; font-weight: 650; color: #0f172a; background: #22c55e; border: none; border-radius: 10px; padding: 13px 16px; margin-top: 16px; cursor: pointer; transition: transform 150ms ease-out, background-color 150ms ease-out; }
 .qr-btn:hover { background: #4ade80; }
 .qr-btn:active { transform: scale(0.96); }
 .qr-btn:focus-visible { outline: 2px solid #f8fafc; outline-offset: 2px; }
+.qr-btn--secondary { background: transparent; color: #f8fafc; border: 1px solid #334155; }
+.qr-btn--secondary:hover { background: rgba(255,255,255,0.06); }
 .qr-status { margin: 12px 0 0; min-height: 24px; font-size: 14px; color: #94a3b8; }
 .qr-status--ok { color: #22c55e; }
 .qr-status--error { color: #ef4444; }
@@ -185,16 +215,19 @@ export function renderReplyPanel(
     keywords?: string[];
     quietHours?: { start: string; end: string } | null;
     businessConnections?: PanelBusinessConnection[];
+    chatReplies?: PanelChatReplies[];
   },
 ): void {
   ensurePanelStyles();
   const appEl = document.querySelector<HTMLDivElement>("#app");
   if (!appEl) return;
+  lastPanelArgs = { replies, chats, cb, voice, opts };
   const senders = opts?.senders ?? [];
   const keywords = opts?.keywords ?? [];
   const quietHours = opts?.quietHours ?? null;
   const businessConnections = opts?.businessConnections ?? [];
-  const signature = JSON.stringify({ replies, chats, voice, senders, keywords, quietHours, businessConnections });
+  const chatReplies = opts?.chatReplies ?? [];
+  const signature = JSON.stringify({ replies, chats, voice, senders, keywords, quietHours, businessConnections, chatReplies, selectedReplyChat });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -210,16 +243,67 @@ export function renderReplyPanel(
 
   const repliesCard = el("section", "qr-card");
   repliesCard.id = "qr-replies-card";
+  // Which chat the editor is scoped to (null = all chats). A chat with
+  // its own set edits that set; one without starts from the global set,
+  // and saving creates a set just for it.
+  const selectedChat =
+    selectedReplyChat === null
+      ? null
+      : (chats.find((c) => c.chat_id === selectedReplyChat) ?? null);
+  const customSet =
+    selectedReplyChat === null
+      ? undefined
+      : chatReplies.find((c) => c.chat_id === selectedReplyChat)?.replies;
+  const scopedReplies = customSet ?? replies;
+  const scopeTitle = selectedChat?.chat_title ?? "this chat";
   repliesCard.append(
     el("h2", "qr-card-title", "Canned replies"),
     el(
       "p",
       "qr-card-help",
-      "Five replies, each at most 64 characters. Tap one on the glasses to send it.",
+      selectedReplyChat === null
+        ? "Five replies, each at most 64 characters. Tap one on the glasses to send it."
+        : customSet
+          ? `Editing replies for ${scopeTitle}. Saving replaces this chat's set.`
+          : `Editing replies for ${scopeTitle} — starting from the all-chats set. Saving creates a set just for this chat.`,
     ),
   );
+  const scopeWrapper = el("div", "qr-field");
+  const scopeLabel = el("label", "qr-label", "Replies for") as HTMLLabelElement;
+  scopeLabel.htmlFor = "qr-replies-scope";
+  const scopeSelect = document.createElement("select");
+  scopeSelect.id = "qr-replies-scope";
+  scopeSelect.className = "qr-select";
+  scopeSelect.setAttribute("aria-label", "Replies for");
+  const allOption = document.createElement("option");
+  allOption.value = "";
+  allOption.textContent = "All chats";
+  scopeSelect.append(allOption);
+  for (const chat of chats) {
+    const option = document.createElement("option");
+    option.value = String(chat.chat_id);
+    option.textContent = chat.chat_title;
+    scopeSelect.append(option);
+  }
+  scopeSelect.value =
+    selectedReplyChat === null ? "" : String(selectedReplyChat);
+  scopeSelect.addEventListener("change", () => {
+    selectedReplyChat =
+      scopeSelect.value === "" ? null : Number(scopeSelect.value);
+    if (lastPanelArgs) {
+      renderReplyPanel(
+        lastPanelArgs.replies,
+        lastPanelArgs.chats,
+        lastPanelArgs.cb,
+        lastPanelArgs.voice,
+        lastPanelArgs.opts,
+      );
+    }
+  });
+  scopeWrapper.append(scopeLabel, scopeSelect);
+  repliesCard.append(scopeWrapper);
   const fieldsEl = el("div", "qr-fields");
-  const fields = replies.map((reply, i) =>
+  const fields = scopedReplies.map((reply, i) =>
     labeledInput(`Reply ${i + 1}`, reply, `qr-reply-${i + 1}`),
   );
   fieldsEl.append(...fields.map((f) => f.wrapper));
@@ -227,17 +311,28 @@ export function renderReplyPanel(
 
   statusEl = el("p", "qr-status") as HTMLParagraphElement;
 
-  repliesCard.append(
-    primaryButton("Save replies", () => {
-      const next = fields.map((f) => f.input.value.trim());
-      if (next.some((t) => t.length === 0 || t.length > 64)) {
-        setPanelStatus("Each reply must be 1-64 characters.", "error");
-        return;
-      }
+  const saveButton = primaryButton("Save replies", () => {
+    const next = fields.map((f) => f.input.value.trim());
+    if (next.some((t) => t.length === 0 || t.length > 64)) {
+      setPanelStatus("Each reply must be 1-64 characters.", "error");
+      return;
+    }
+    if (selectedReplyChat === null) {
       cb.onSave(next);
-    }),
-    statusEl,
-  );
+    } else {
+      cb.onSaveChatReplies?.(selectedReplyChat, next);
+    }
+  });
+  const replyButtons: HTMLButtonElement[] = [saveButton];
+  if (selectedReplyChat !== null && customSet) {
+    const resetButton = primaryButton("Reset to all-chats replies", () => {
+      cb.onClearChatReplies?.(selectedReplyChat as number);
+    });
+    resetButton.id = "qr-replies-reset";
+    resetButton.classList.add("qr-btn--secondary");
+    replyButtons.push(resetButton);
+  }
+  repliesCard.append(...replyButtons, statusEl);
   root.append(repliesCard);
 
   const chatsCard = el("section", "qr-card");

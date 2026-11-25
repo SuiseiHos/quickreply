@@ -167,6 +167,18 @@ export function messageScreen(m: InboxMessage, page = 0): string {
 }
 
 /** Reply menu (Screen 4): the 5 canned replies, `"> "` on the selected one. */
+/** The canned replies for one chat: the chat's own set when it has one,
+ * else the global set. The menu and the send path both resolve through
+ * this one rule, so the glasses never show a reply the send would not
+ * use. */
+export function repliesForChat(
+  chatReplies: Record<number, string[]>,
+  chatId: number,
+  fallback: string[],
+): string[] {
+  return chatReplies[chatId] ?? fallback;
+}
+
 export function replyMenuScreen(
   chatTitle: string,
   replies: string[],

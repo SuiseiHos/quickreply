@@ -15,6 +15,7 @@ import {
   transcribingScreen,
   sendError,
   editHintScreen,
+  repliesForChat,
   wrapText,
 } from "./screens.js";
 
@@ -311,6 +312,19 @@ test("no screen line exceeds 64 chars with a long chat title", () => {
       expect(line.length).toBeLessThanOrEqual(64);
     }
   }
+});
+
+test("repliesForChat returns the chat's own set when it has one", () => {
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  const global = ["On my way", "Noted, will check", "Can't talk now", "Yes", "No"];
+  expect(repliesForChat({ "-123": work }, -123, global)).toEqual(work);
+});
+
+test("repliesForChat falls back to the global set for other chats", () => {
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  const global = ["On my way", "Noted, will check", "Can't talk now", "Yes", "No"];
+  expect(repliesForChat({ "-123": work }, -999, global)).toEqual(global);
+  expect(repliesForChat({}, -123, global)).toEqual(global);
 });
 
 test("sendError maps every send-error code to a retryable error screen", () => {

@@ -26,10 +26,11 @@ import {
   sendingScreen,
   transcribingScreen,
   sendError,
+  repliesForChat,
   type InboxMessage,
 } from "./screens";
 import { createUndoWindow, type UndoWindow } from "./undo";
-import { renderReplyPanel, setPanelStatus, type PanelBusinessConnection, type PanelChat, type PanelSender } from "./phone-panel";
+import { renderReplyPanel, setPanelStatus, type PanelBusinessConnection, type PanelChat, type PanelChatReplies, type PanelSender } from "./phone-panel";
 
 const HOME_CONTAINER_ID = 1;
 const HOME_CONTAINER_NAME = "home";
@@ -84,6 +85,9 @@ let keywordsSavePending = false;
 let quietHours: { start: string; end: string } | null = null;
 let quietHoursSavePending = false;
 let businessConnections: PanelBusinessConnection[] = [];
+/** Per-chat reply sets, by chat id (chats without one use `replies`). */
+let chatReplies: Record<number, string[]> = {};
+let chatRepliesSavePending = false;
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -144,7 +148,7 @@ function currentScreenText(): string {
         : homeScreen(unreadCount);
     case "menu":
       return currentMessage
-        ? replyMenuScreen(currentMessage.chat_title, replies, menuSelected)
+        ? replyMenuScreen(currentMessage.chat_title, repliesForChat(chatReplies, currentMessage.chat_id, replies), menuSelected)
         : homeScreen(unreadCount);
     case "confirming":
       return pendingSendScreen();
@@ -200,13 +204,21 @@ function render(): void {
       setPanelStatus("Saving...");
       sendToServer({ type: "set-quiet-hours", start, end });
     },
+    onSaveChatReplies: (chatId, next) => {
+      chatRepliesSavePending = true;
+      setPanelStatus("Saving...");
+      sendToServer({ type: "set-chat-replies", chat_id: chatId, replies: next });
+    },
+    onClearChatReplies: (chatId) => {
+      sendToServer({ type: "clear-chat-replies", chat_id: chatId });
+    },
   },
   // The phone panel shows the voice-reply editor only while a review
   // is active (or its too-long error is showing).
   (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
     ? { messageId: voiceMessage.id, text: reviewTranscript }
     : null,
-  { senders, keywords, quietHours, businessConnections },
+  { senders, keywords, quietHours, businessConnections, chatReplies: Object.entries(chatReplies).map(([chat_id, replies]) => ({ chat_id: Number(chat_id), replies })) },
   );
 }
 
@@ -620,7 +632,7 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown; quietHours?: unknown; businessConnections?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown; quietHours?: unknown; businessConnections?: unknown; chatReplies?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
@@ -651,9 +663,31 @@ function handleServerMessage(raw: string): void {
     if (Array.isArray(payload.businessConnections)) {
       businessConnections = payload.businessConnections as PanelBusinessConnection[];
     }
+    if (Array.isArray(payload.chatReplies)) {
+      chatReplies = {};
+      for (const entry of payload.chatReplies as PanelChatReplies[]) {
+        if (typeof entry.chat_id === "number" && Array.isArray(entry.replies)) {
+          chatReplies[entry.chat_id] = entry.replies;
+        }
+      }
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
+    render();
+  } else if (type === "chat-replies-updated") {
+    const payload = msg as { chat_id?: unknown; replies?: unknown };
+    if (typeof payload.chat_id === "number") {
+      if (Array.isArray(payload.replies)) {
+        chatReplies[payload.chat_id] = payload.replies as string[];
+      } else if (payload.replies === null) {
+        delete chatReplies[payload.chat_id];
+      }
+    }
+    if (chatRepliesSavePending) {
+      setPanelStatus("Saved", "ok");
+      chatRepliesSavePending = false;
+    }
     render();
   } else if (type === "quiet-hours-updated") {
     const next = (msg as { quietHours?: unknown }).quietHours;
@@ -779,9 +813,10 @@ function handleServerMessage(raw: string): void {
     const code = (msg as { code?: unknown }).code;
     const messageId = (msg as { messageId?: unknown }).messageId;
     if (code === "bad-replies") {
-      if (savePending) {
+      if (savePending || chatRepliesSavePending) {
         setPanelStatus("Each reply must be 1-64 characters.", "error");
         savePending = false;
+        chatRepliesSavePending = false;
       }
       return;
     }
