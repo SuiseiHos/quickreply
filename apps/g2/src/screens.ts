@@ -200,6 +200,38 @@ export function errorScreen(message: string): string {
   return [message, "", "Tap = Retry", "Long-press = Back"].join("\n");
 }
 
+/** What a tap on the error screen retries: re-send, or re-record (voice). */
+export type SendRetry = "send" | "record";
+
+/**
+ * Maps a server send-error code to the glasses error screen. Total: any
+ * unknown code falls back to a generic retryable failure, so no future
+ * error code can strand the glasses on "Sending…" with no retry. A
+ * too-long voice send is fixed by re-recording (or the phone edit);
+ * every other failure retries the send.
+ */
+export function sendError(
+  code: string,
+  lastSendKind: "canned" | "voice" | null,
+): { text: string; retry: SendRetry } {
+  if (code === "too-long") {
+    return {
+      text: "Too long. Edit it on the phone.",
+      retry: lastSendKind === "voice" ? "record" : "send",
+    };
+  }
+  if (code === "empty") {
+    return { text: "Nothing heard — try again", retry: "send" };
+  }
+  if (code === "unknown-chat") {
+    return { text: "Unknown chat. Tap to retry.", retry: "send" };
+  }
+  if (code === "business-unavailable") {
+    return { text: "Business disconnected. Tap to retry.", retry: "send" };
+  }
+  return { text: "Send failed. Tap to retry.", retry: "send" };
+}
+
 /** Recording screen (Screen 5): the chat being answered + REC.
  * No "●" glyph: the glasses font does not render "▸" or "✓" (verified
  * 24 Nov 2026), and "●" is the same class of glyph. Plain "REC" reads. */

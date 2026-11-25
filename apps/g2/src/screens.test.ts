@@ -13,6 +13,7 @@ import {
   recordingScreen,
   reviewScreen,
   transcribingScreen,
+  sendError,
   editHintScreen,
   wrapText,
 } from "./screens.js";
@@ -310,4 +311,42 @@ test("no screen line exceeds 64 chars with a long chat title", () => {
       expect(line.length).toBeLessThanOrEqual(64);
     }
   }
+});
+
+test("sendError maps every send-error code to a retryable error screen", () => {
+  expect(sendError("send-failed", "canned")).toEqual({
+    text: "Send failed. Tap to retry.",
+    retry: "send",
+  });
+  expect(sendError("business-unavailable", "canned")).toEqual({
+    text: "Business disconnected. Tap to retry.",
+    retry: "send",
+  });
+  // A dead connection is the problem, not the recording — voice retries
+  // the send too.
+  expect(sendError("business-unavailable", "voice")).toEqual({
+    text: "Business disconnected. Tap to retry.",
+    retry: "send",
+  });
+  expect(sendError("unknown-chat", "canned")).toEqual({
+    text: "Unknown chat. Tap to retry.",
+    retry: "send",
+  });
+  expect(sendError("empty", "voice")).toEqual({
+    text: "Nothing heard — try again",
+    retry: "send",
+  });
+  expect(sendError("too-long", "voice")).toEqual({
+    text: "Too long. Edit it on the phone.",
+    retry: "record",
+  });
+  expect(sendError("too-long", "canned")).toEqual({
+    text: "Too long. Edit it on the phone.",
+    retry: "send",
+  });
+  // Unknown future code: generic retryable failure, never a silent stall.
+  expect(sendError("weird-future-code", "canned")).toEqual({
+    text: "Send failed. Tap to retry.",
+    retry: "send",
+  });
 });

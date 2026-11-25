@@ -109,7 +109,7 @@ describe("renderReplyPanel", () => {
     expect(cb.onToggleVip).toHaveBeenCalledWith(777, true);
   });
 
-  it("renders the Business card: not connected, and connected", () => {
+  it("renders the Business card: not connected, connected, and paused", () => {
     renderReplyPanel(REPLIES, CHATS, callbacks(), null, {
       businessConnections: [],
     });
@@ -122,6 +122,13 @@ describe("renderReplyPanel", () => {
     });
     const connected = document.querySelector("#qr-business-card") as HTMLElement;
     expect(connected.textContent).toContain("Connected");
+    renderReplyPanel(REPLIES, CHATS, callbacks(), null, {
+      businessConnections: [
+        { id: "conn-1", user_chat_id: 777, can_reply: false, is_enabled: true },
+      ],
+    });
+    const paused = document.querySelector("#qr-business-card") as HTMLElement;
+    expect(paused.textContent).toContain("paused");
   });
 
   it("renders the keywords input with the current list and saves edits", () => {

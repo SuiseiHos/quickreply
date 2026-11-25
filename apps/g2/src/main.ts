@@ -25,6 +25,7 @@ import {
   reviewScreen,
   sendingScreen,
   transcribingScreen,
+  sendError,
   type InboxMessage,
 } from "./screens";
 import { createUndoWindow, type UndoWindow } from "./undo";
@@ -674,8 +675,8 @@ function handleServerMessage(raw: string): void {
     const next = (msg as { businessConnections?: unknown }).businessConnections;
     if (Array.isArray(next)) {
       businessConnections = next as PanelBusinessConnection[];
+      render();
     }
-    render();
   } else if (type === "keywords-updated") {
     const next = (msg as { keywords?: unknown }).keywords;
     if (Array.isArray(next)) keywords = next as string[];
@@ -830,23 +831,16 @@ function handleServerMessage(raw: string): void {
       return;
     }
     // A send error (a reply to this socket only): it applies only while a
-    // send is in flight or already on the error screen.
+    // send is in flight or already on the error screen. The mapping is
+    // total — any code, including a future one, lands on a retryable
+    // error screen, never a silent stall on "Sending…".
     if (screen !== "sending" && screen !== "error") return;
-    if (code === "send-failed") {
-      errorText = "Send failed. Tap to retry.";
-    } else if (code === "too-long") {
-      errorText = "Too long. Edit it on the phone.";
-    } else if (code === "empty") {
-      errorText = "Nothing heard — try again";
-    } else if (code === "unknown-chat") {
-      errorText = "Unknown chat. Tap to retry.";
-    } else {
-      return;
-    }
-    // A too-long voice send is fixed by re-recording (or the phone edit);
-    // a canned send failure retries the send.
-    errorRetry =
-      code === "too-long" && lastSend?.kind === "voice" ? "record" : "send";
+    const err = sendError(
+      typeof code === "string" ? code : "send-failed",
+      lastSend?.kind ?? null,
+    );
+    errorText = err.text;
+    errorRetry = err.retry;
     screen = "error";
     render();
   }
