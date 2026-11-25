@@ -108,6 +108,13 @@ function getDb(): DatabaseSync {
       is_enabled INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS chat_replies (
+      chat_id INTEGER NOT NULL,
+      slot INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(chat_id, slot)
+    );
   `);
   // Migration: sender_id arrived after the first messages were stored.
   // ALTER is idempotent here — it runs only when the column is missing,
@@ -134,6 +141,14 @@ const DEFAULT_REPLIES = [
   "Yes",
   "No",
 ];
+
+/** True when the bot has ever seen the chat (it shows in the panel). */
+export function isKnownChat(chatId: number): boolean {
+  const row = getDb()
+    .prepare("SELECT chat_id FROM known_chats WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number } | undefined;
+  return row !== undefined;
+}
 
 /** The 5 canned reply slots, seeded with the defaults on first read. */
 export function getReplies(): string[] {
@@ -175,6 +190,83 @@ export function setReplies(texts: string[]): boolean {
   );
   trimmed.forEach((text, i) => upsert.run(i + 1, text, now));
   return true;
+}
+
+/**
+ * The 5 canned replies for one chat: the chat's own set when it has one,
+ * else the global set. A set is always saved as all 5, so "any row
+ * exists" means "a full set exists" — there is no partial state.
+ */
+export function getRepliesForChat(chatId: number): string[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT text FROM chat_replies WHERE chat_id = ? ORDER BY slot ASC",
+    )
+    .all(chatId) as { text: string }[];
+  if (rows.length === 0) return getReplies();
+  return rows.map((r) => r.text);
+}
+
+/** True when the chat has its own reply set (rather than the global one). */
+export function hasChatReplies(chatId: number): boolean {
+  const row = getDb()
+    .prepare("SELECT 1 FROM chat_replies WHERE chat_id = ? LIMIT 1")
+    .get(chatId);
+  return row !== undefined;
+}
+
+/**
+ * Replaces a chat's 5 reply slots. Returns false (and changes nothing)
+ * unless the input is exactly 5 strings of 1–64 chars after trimming
+ * AND the chat is known — the panel only ever shows known chats, so an
+ * unknown id here means a forged or stale message.
+ */
+export function setChatReplies(chatId: number, texts: string[]): boolean {
+  if (!isKnownChat(chatId)) return false;
+  if (texts.length !== 5) return false;
+  const trimmed = texts.map((t) => t.trim());
+  if (trimmed.some((t) => t.length === 0 || t.length > 64)) return false;
+  const database = getDb();
+  const now = new Date().toISOString();
+  const upsert = database.prepare(
+    `INSERT INTO chat_replies (chat_id, slot, text, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(chat_id, slot) DO UPDATE SET text = excluded.text,
+       updated_at = excluded.updated_at`,
+  );
+  trimmed.forEach((text, i) => upsert.run(chatId, i + 1, text, now));
+  return true;
+}
+
+/**
+ * Deletes a chat's own set, so it falls back to the global replies.
+ * Returns false for an unknown chat; clearing a chat with no custom set
+ * is a no-op that still returns true.
+ */
+export function clearChatReplies(chatId: number): boolean {
+  if (!isKnownChat(chatId)) return false;
+  getDb()
+    .prepare("DELETE FROM chat_replies WHERE chat_id = ?")
+    .run(chatId);
+  return true;
+}
+
+/** Every chat with a full custom set, with its 5 replies, by chat id. */
+export function listChatReplies(): { chat_id: number; replies: string[] }[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT chat_id, text FROM chat_replies ORDER BY chat_id ASC, slot ASC",
+    )
+    .all() as { chat_id: number; text: string }[];
+  const byChat = new Map<number, string[]>();
+  for (const r of rows) {
+    const list = byChat.get(r.chat_id) ?? [];
+    list.push(r.text);
+    byChat.set(r.chat_id, list);
+  }
+  return [...byChat.entries()]
+    .filter(([, replies]) => replies.length === 5)
+    .map(([chat_id, replies]) => ({ chat_id, replies }));
 }
 
 export function getMessage(id: string): StoredMessage | null {
@@ -624,6 +716,6 @@ export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
   getDb().exec(
-    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders; DELETE FROM settings; DELETE FROM business_connections;",
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders; DELETE FROM settings; DELETE FROM business_connections; DELETE FROM chat_replies;",
   );
 }

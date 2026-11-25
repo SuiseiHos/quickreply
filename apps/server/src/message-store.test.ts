@@ -26,6 +26,12 @@ import {
   setBusinessConnection,
   getBusinessConnection,
   listBusinessConnections,
+  setChatReplies,
+  getRepliesForChat,
+  clearChatReplies,
+  hasChatReplies,
+  listChatReplies,
+  isKnownChat,
   __clearAllForTests,
   type IncomingMessage,
 } from "./message-store.js";
@@ -224,6 +230,61 @@ test("a message with a business connection id round-trips through save/get", () 
   // And a normal message still reads back null.
   saveMessage(FIXTURE);
   expect(getMessage("-123:7")?.business_connection_id).toBeNull();
+});
+
+test("per-chat replies round-trip, and other chats fall back to global", () => {
+  recordKnownChat(-123, "Ops");
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  expect(setChatReplies(-123, work)).toBe(true);
+  expect(getRepliesForChat(-123)).toEqual(work);
+  expect(hasChatReplies(-123)).toBe(true);
+  // Another chat, and the global list, are untouched.
+  expect(getRepliesForChat(-999)).toEqual(getReplies());
+  expect(hasChatReplies(-999)).toBe(false);
+  expect(getReplies()).toEqual([
+    "On my way",
+    "Noted, will check",
+    "Can't talk now",
+    "Yes",
+    "No",
+  ]);
+});
+
+test("setChatReplies rejects invalid lists and stores nothing", () => {
+  recordKnownChat(-123, "Ops");
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  setChatReplies(-123, work);
+  expect(setChatReplies(-123, ["a", "b", "c", "d"])).toBe(false);
+  expect(setChatReplies(-123, ["", "b", "c", "d", "e"])).toBe(false);
+  expect(setChatReplies(-123, ["a".repeat(65), "b", "c", "d", "e"])).toBe(
+    false,
+  );
+  expect(getRepliesForChat(-123)).toEqual(work);
+});
+
+test("setChatReplies for an unknown chat returns false", () => {
+  expect(isKnownChat(-123)).toBe(false);
+  expect(setChatReplies(-123, ["a", "b", "c", "d", "e"])).toBe(false);
+  expect(hasChatReplies(-123)).toBe(false);
+});
+
+test("clearChatReplies restores the global set with no rows left", () => {
+  recordKnownChat(-123, "Ops");
+  setChatReplies(-123, ["On it", "In a meeting", "Will check", "Yes", "No"]);
+  expect(clearChatReplies(-123)).toBe(true);
+  expect(getRepliesForChat(-123)).toEqual(getReplies());
+  expect(hasChatReplies(-123)).toBe(false);
+  expect(listChatReplies()).toEqual([]);
+  // Clearing again is a no-op, not an error.
+  expect(clearChatReplies(-123)).toBe(true);
+});
+
+test("listChatReplies returns only chats with a full custom set", () => {
+  recordKnownChat(-123, "Ops");
+  recordKnownChat(-456, "Family");
+  const work = ["On it", "In a meeting", "Will check", "Yes", "No"];
+  setChatReplies(-123, work);
+  expect(listChatReplies()).toEqual([{ chat_id: -123, replies: work }]);
 });
 
 test("offset persists: setOffset then getOffset round-trips", () => {
