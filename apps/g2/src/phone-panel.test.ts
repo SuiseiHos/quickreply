@@ -24,17 +24,21 @@ function callbacks(): ReplyPanelCallbacks & {
   onSaveVoice: ReturnType<typeof vi.fn>;
   onToggleChat: ReturnType<typeof vi.fn>;
   onToggleVip: ReturnType<typeof vi.fn>;
+  onSaveKeywords: ReturnType<typeof vi.fn>;
 } {
   return {
     onSave: vi.fn(),
     onSaveVoice: vi.fn(),
     onToggleChat: vi.fn(),
     onToggleVip: vi.fn(),
+    onSaveKeywords: vi.fn(),
   };
 }
 
 function inputs(): HTMLInputElement[] {
-  return [...document.querySelectorAll(".qr-input")] as HTMLInputElement[];
+  return [
+    ...document.querySelectorAll("#qr-replies-card .qr-input"),
+  ] as HTMLInputElement[];
 }
 
 beforeEach(() => {
@@ -101,6 +105,22 @@ describe("renderReplyPanel", () => {
     toggles[1].checked = true;
     toggles[1].dispatchEvent(new Event("change", { bubbles: true }));
     expect(cb.onToggleVip).toHaveBeenCalledWith(777, true);
+  });
+
+  it("renders the keywords input with the current list and saves edits", () => {
+    const cb = callbacks();
+    renderReplyPanel(REPLIES, CHATS, cb, null, {
+      senders: SENDERS,
+      keywords: ["down", "asap"],
+    });
+    const input = document.querySelector("#qr-keywords") as HTMLInputElement;
+    expect(input.value).toBe("down, asap");
+    input.value = "down, failed";
+    const saveBtn = [...document.querySelectorAll(".qr-btn")].find(
+      (b) => b.textContent === "Save keywords",
+    ) as HTMLButtonElement;
+    saveBtn.click();
+    expect(cb.onSaveKeywords).toHaveBeenCalledWith("down, failed");
   });
 
   it("saves trimmed replies and rejects an empty slot without calling onSave", () => {

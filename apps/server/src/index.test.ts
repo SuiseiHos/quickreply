@@ -7,6 +7,7 @@ import {
   saveMessage,
   listInbox,
   listVips,
+  getKeywords,
   recordKnownChat,
   isAllowedChat,
   setChatAllowed,
@@ -562,6 +563,44 @@ test("WS set-vip with a malformed payload is ignored, no crash", async () => {
       const msg = await reply;
       expect(msg.type).toBe("inbox");
       expect(listVips()).toEqual([]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-keywords updates the list and broadcasts keywords-updated", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "set-keywords", keywords: "down, asap" }));
+      const msg = await pushed;
+      expect(msg.type).toBe("keywords-updated");
+      expect(msg.keywords).toEqual(["down", "asap"]);
+      expect(getKeywords()).toEqual(["down", "asap"]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-keywords with an invalid list replies bad-keywords", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "set-keywords", keywords: "a".repeat(33) }));
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-keywords");
+      expect(getKeywords()).toEqual(["urgent", "asap", "down", "failed"]);
     } finally {
       ws.close();
     }

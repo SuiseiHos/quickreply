@@ -78,6 +78,8 @@ let replies: string[] = [
 let chats: PanelChat[] = [];
 let senders: PanelSender[] = [];
 let vips: number[] = [];
+let keywords: string[] = [];
+let keywordsSavePending = false;
 let unreadCount = 0;
 let latest: { chatTitle: string; firstLine: string } | undefined;
 let inboxSelected = 0;
@@ -181,13 +183,18 @@ function render(): void {
     onToggleVip: (senderId, vip) => {
       sendToServer({ type: "set-vip", sender_id: senderId, vip });
     },
+    onSaveKeywords: (text) => {
+      keywordsSavePending = true;
+      setPanelStatus("Saving...");
+      sendToServer({ type: "set-keywords", keywords: text });
+    },
   },
   // The phone panel shows the voice-reply editor only while a review
   // is active (or its too-long error is showing).
   (screen === "review" || screen === "edit-hint" || (screen === "error" && errorRetry === "record")) && voiceMessage
     ? { messageId: voiceMessage.id, text: reviewTranscript }
     : null,
-  { senders },
+  { senders, keywords },
   );
 }
 
@@ -592,7 +599,7 @@ function handleServerMessage(raw: string): void {
   if (typeof msg !== "object" || msg === null) return;
   const type = (msg as { type?: unknown }).type;
   if (type === "inbox") {
-    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown };
+    const payload = msg as { messages?: unknown; replies?: unknown; chats?: unknown; senders?: unknown; vips?: unknown; keywords?: unknown };
     if (Array.isArray(payload.messages)) {
       messages = payload.messages as InboxMessage[];
     }
@@ -608,9 +615,20 @@ function handleServerMessage(raw: string): void {
     if (Array.isArray(payload.vips)) {
       vips = payload.vips as number[];
     }
+    if (Array.isArray(payload.keywords)) {
+      keywords = payload.keywords as string[];
+    }
     unreadCount = messages.filter((m) => m.read === 0).length;
     inboxSelected = 0;
     inboxPageStart = 0;
+    render();
+  } else if (type === "keywords-updated") {
+    const next = (msg as { keywords?: unknown }).keywords;
+    if (Array.isArray(next)) keywords = next as string[];
+    if (keywordsSavePending) {
+      setPanelStatus("Saved", "ok");
+      keywordsSavePending = false;
+    }
     render();
   } else if (type === "chats-updated") {
     const next = (msg as { chats?: unknown }).chats;
@@ -709,6 +727,13 @@ function handleServerMessage(raw: string): void {
       if (savePending) {
         setPanelStatus("Each reply must be 1-64 characters.", "error");
         savePending = false;
+      }
+      return;
+    }
+    if (code === "bad-keywords") {
+      if (keywordsSavePending) {
+        setPanelStatus("Too many keywords, or one is too long.", "error");
+        keywordsSavePending = false;
       }
       return;
     }

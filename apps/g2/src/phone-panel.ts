@@ -16,6 +16,8 @@ export type ReplyPanelCallbacks = {
   onToggleChat?: (chatId: number, allowed: boolean) => void;
   /** User flipped a sender's VIP toggle. */
   onToggleVip?: (senderId: number, vip: boolean) => void;
+  /** User saved the urgency keywords (comma-separated). */
+  onSaveKeywords?: (keywords: string) => void;
 };
 
 /** A chat the bot has seen, with its allowlist flag. */
@@ -153,13 +155,14 @@ export function renderReplyPanel(
   chats: PanelChat[],
   cb: ReplyPanelCallbacks,
   voice?: VoiceReply | null,
-  opts?: { senders?: PanelSender[] },
+  opts?: { senders?: PanelSender[]; keywords?: string[] },
 ): void {
   ensurePanelStyles();
   const appEl = document.querySelector<HTMLDivElement>("#app");
   if (!appEl) return;
   const senders = opts?.senders ?? [];
-  const signature = JSON.stringify({ replies, chats, voice, senders });
+  const keywords = opts?.keywords ?? [];
+  const signature = JSON.stringify({ replies, chats, voice, senders, keywords });
   if (signature === lastRendered) return;
   lastRendered = signature;
   appEl.textContent = "";
@@ -174,6 +177,7 @@ export function renderReplyPanel(
   root.append(header);
 
   const repliesCard = el("section", "qr-card");
+  repliesCard.id = "qr-replies-card";
   repliesCard.append(
     el("h2", "qr-card-title", "Canned replies"),
     el(
@@ -266,6 +270,28 @@ export function renderReplyPanel(
   }
   vipCard.append(vipList);
   root.append(vipCard);
+
+  const keywordsCard = el("section", "qr-card");
+  keywordsCard.id = "qr-keywords-card";
+  keywordsCard.append(
+    el("h2", "qr-card-title", "Urgency keywords"),
+    el(
+      "p",
+      "qr-card-help",
+      "Messages containing one of these words jump ahead in the inbox. Comma-separated, at most 20. Leave empty to turn urgency off.",
+    ),
+  );
+  const kw = el("input", "qr-input") as HTMLInputElement;
+  kw.id = "qr-keywords";
+  kw.value = keywords.join(", ");
+  kw.setAttribute("aria-label", "Urgency keywords, comma-separated");
+  keywordsCard.append(kw);
+  keywordsCard.append(
+    primaryButton("Save keywords", () => {
+      cb.onSaveKeywords?.(kw.value);
+    }),
+  );
+  root.append(keywordsCard);
 
   if (voice && cb.onSaveVoice) {
     const voiceCard = el("section", "qr-card");

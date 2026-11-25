@@ -12,6 +12,8 @@ import {
   listSenders,
   setVip,
   listVips,
+  getKeywords,
+  setKeywords,
   getOffset,
   setOffset,
   recordKnownChat,
@@ -63,6 +65,28 @@ test("listSenders returns distinct senders by id", () => {
 test("listSenders skips messages with no sender id", () => {
   saveMessage({ ...FIXTURE, sender_id: null });
   expect(listSenders()).toEqual([]);
+});
+
+test("getKeywords returns the seeded defaults when nothing is stored", () => {
+  expect(getKeywords()).toEqual(["urgent", "asap", "down", "failed"]);
+});
+
+test("setKeywords stores a comma list, trims, and drops empties", () => {
+  expect(setKeywords("  down , FAILED,, asap ")).toBe(true);
+  expect(getKeywords()).toEqual(["down", "FAILED", "asap"]);
+});
+
+test("setKeywords rejects more than 20 keywords or one over 32 chars", () => {
+  expect(setKeywords(Array.from({ length: 21 }, (_, i) => `k${i}`).join(","))).toBe(
+    false,
+  );
+  expect(setKeywords("a".repeat(33))).toBe(false);
+  expect(getKeywords()).toEqual(["urgent", "asap", "down", "failed"]);
+});
+
+test("setKeywords with an empty string disables urgency matching", () => {
+  expect(setKeywords("   ")).toBe(true);
+  expect(getKeywords()).toEqual([]);
 });
 
 test("setVip on an unknown sender returns false and changes nothing", () => {

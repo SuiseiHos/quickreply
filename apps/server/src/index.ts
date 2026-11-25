@@ -7,6 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import {
+  getKeywords,
   getMessage,
   getReplies,
   listInbox,
@@ -16,9 +17,11 @@ import {
   markRead,
   seedAllowedFromMessages,
   setChatAllowed,
+  setKeywords,
   setReplies,
   setVip,
 } from "./message-store.js";
+import { isUrgent } from "./triage.js";
 import { sendCanned, sendText, type SendResult } from "./send.js";
 import { createAudioHandler, type TranscribeFn } from "./ws-audio.js";
 import {
@@ -124,10 +127,14 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
     const type = (msg as { type?: unknown }).type;
     if (type === "list-inbox") {
       const vips = listVips();
+      const keywords = getKeywords();
       ws.send(
         JSON.stringify({
           type: "inbox",
-          messages: listInbox(),
+          messages: listInbox().map((m) => ({
+            ...m,
+            urgent: isUrgent(m.text, keywords),
+          })),
           replies: getReplies(),
           chats: listKnownChats(),
           senders: listSenders().map((s) => ({
@@ -135,8 +142,20 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
             vip: vips.includes(s.sender_id),
           })),
           vips,
+          keywords,
         }),
       );
+    } else if (type === "set-keywords") {
+      // Phone-panel keyword editor: a comma-separated list. An empty
+      // string disables urgency matching. Invalid lists are rejected
+      // and store nothing — the panel shows the error.
+      const keywords = (msg as { keywords?: unknown }).keywords;
+      if (typeof keywords !== "string") return;
+      if (!setKeywords(keywords)) {
+        ws.send(JSON.stringify({ type: "error", code: "bad-keywords" }));
+        return;
+      }
+      broadcast({ type: "keywords-updated", keywords: getKeywords() });
     } else if (type === "set-vip") {
       // Phone-panel VIP toggle: only the local panel can change it, and
       // only for a sender the bot has already seen. An unknown sender id
@@ -314,7 +333,13 @@ if (entry && import.meta.url === pathToFileURL(entry).href) {
       console.log(
         `[QuickReply] new message from ${message.chat_title}: ${message.text.slice(0, 60)}`,
       );
-      hub.broadcast({ type: "message", message });
+      hub.broadcast({
+        type: "message",
+        message: {
+          ...message,
+          urgent: isUrgent(message.text, getKeywords()),
+        },
+      });
     },
     onNewChat: () => {
       hub.broadcast({ type: "chats-updated", chats: listKnownChats() });

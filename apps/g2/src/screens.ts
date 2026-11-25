@@ -10,6 +10,8 @@ export type InboxMessage = {
   /** Telegram user id of the sender (null for old rows without one). */
   sender_id: number | null;
   sender_name: string;
+  /** True when the text matches an urgency keyword (set by the server). */
+  urgent?: boolean;
   text: string;
   created_at: string;
   read: number;
@@ -117,7 +119,8 @@ export function inboxScreen(
     const marker = idx === selected ? ">" : " ";
     const vipMark =
       m.sender_id !== null && vips.includes(m.sender_id) ? "VIP " : "";
-    const prefix = `${marker} ${idx + 1}. ${vipMark}${m.chat_title} — `;
+    const urgentMark = m.urgent ? "! " : "";
+    const prefix = `${marker} ${idx + 1}. ${vipMark}${urgentMark}${m.chat_title} — `;
     const maxText = LIST_LINE_MAX - prefix.length;
     const text =
       firstLine(m.text).length > maxText && maxText > 3

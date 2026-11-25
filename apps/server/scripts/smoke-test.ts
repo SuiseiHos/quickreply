@@ -26,6 +26,7 @@ const FIXTURE: IncomingMessage = {
   update_id: 1001,
   chat_id: -123,
   chat_title: "Ops",
+  sender_id: 555,
   sender_name: "Ani",
   text: "hello from the group",
   created_at: new Date(1795524000 * 1000).toISOString(),

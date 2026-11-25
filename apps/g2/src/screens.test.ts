@@ -95,6 +95,16 @@ test("inboxScreen prefixes a VIP sender's row with VIP", () => {
   expect(screen.split("\n")[3]).toBe("  2. Ops — from budi");
 });
 
+test("inboxScreen prefixes an urgent row with !", () => {
+  const messages = [
+    { ...INBOX_MSG, urgent: true, text: "server is down" },
+    { ...INBOX_MSG, id: "-123:8", update_id: 1002, text: "lunch?" },
+  ];
+  const screen = inboxScreen(messages, 0, 0);
+  expect(screen.split("\n")[2]).toBe("> 1. ! Ops — server is down");
+  expect(screen.split("\n")[3]).toBe("  2. Ops — lunch?");
+});
+
 test("inboxScreen truncates a long first line to 64 chars", () => {
   const long = { ...INBOX_MSG, text: "word ".repeat(30) };
   const screen = inboxScreen([long], 0, 0);

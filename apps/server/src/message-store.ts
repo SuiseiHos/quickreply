@@ -81,6 +81,10 @@ function getDb(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS vip_senders (
       sender_id INTEGER PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   // Migration: sender_id arrived after the first messages were stored.
   // ALTER is idempotent here — it runs only when the column is missing,
@@ -382,7 +386,7 @@ export function saveMessage(m: IncomingMessage): boolean {
       m.update_id,
       m.chat_id,
       m.chat_title,
-      m.sender_id,
+      m.sender_id ?? null,
       m.sender_name,
       m.text,
       m.created_at,
@@ -396,9 +400,46 @@ export function listInbox(): StoredMessage[] {
     string,
     unknown
   >[];
-  // Ranking lives in triage.ts (VIP first, then unread, then newest) so
-  // the sort is one pure function the tests can pin, not SQL.
-  return rankInbox(rows.map(rowToMessage), listVips());
+  // Ranking lives in triage.ts (VIP first, then urgent, then unread,
+  // then newest) so the sort is one pure function the tests can pin.
+  return rankInbox(rows.map(rowToMessage), listVips(), getKeywords());
+}
+
+export const DEFAULT_KEYWORDS = ["urgent", "asap", "down", "failed"];
+
+/** Urgency keywords. Unset means the seeded defaults; an empty list
+ * (stored as "") disables urgency matching entirely. */
+export function getKeywords(): string[] {
+  const row = getDb()
+    .prepare("SELECT value FROM settings WHERE key = 'keywords'")
+    .get() as { value: string } | undefined;
+  if (!row) return [...DEFAULT_KEYWORDS];
+  if (row.value.trim() === "") return [];
+  return row.value
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0);
+}
+
+/**
+ * Stores a comma-separated keyword list. Returns false when the list is
+ * invalid — more than 20 keywords, or any keyword longer than 32 chars —
+ * and stores nothing in that case. An empty string disables matching.
+ */
+export function setKeywords(csv: string): boolean {
+  const keywords = csv
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0);
+  if (keywords.length > 20) return false;
+  if (keywords.some((k) => k.length > 32)) return false;
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES ('keywords', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(keywords.join(","));
+  return true;
 }
 
 /** VIP senders, by Telegram user id. VIP is by id, never by name. */
@@ -453,6 +494,6 @@ export function __clearAllForTests(): void {
   // The replies table is cleared too: getReplies() re-seeds the defaults
   // on the next read, so no test sees another test's saved replies.
   getDb().exec(
-    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders;",
+    "DELETE FROM messages; DELETE FROM meta; DELETE FROM replies; DELETE FROM send_keys; DELETE FROM known_chats; DELETE FROM allowed_chats; DELETE FROM vip_senders; DELETE FROM settings;",
   );
 }
