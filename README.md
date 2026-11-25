@@ -1,5 +1,7 @@
 # QuickReply
 
+<p align="center"><img src="logo-lockup.png" alt="QuickReply logo" width="400"></p>
+
 **Reply to Telegram from your Even G2 glasses. Three taps from the inbox — or speak one, and the glasses send exactly what you said. No AI in the loop.**
 
 ![QuickReply demo — the eight glasses screens](demo.gif)
