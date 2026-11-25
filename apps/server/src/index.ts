@@ -11,14 +11,18 @@ import {
   getMessage,
   getQuietHours,
   getReplies,
+  isKnownChat,
   listBusinessConnections,
+  listChatReplies,
   listInbox,
   listKnownChats,
   listSenders,
   listVips,
   markRead,
   seedAllowedFromMessages,
+  clearChatReplies,
   setChatAllowed,
+  setChatReplies,
   setKeywords,
   setQuietHours,
   setReplies,
@@ -149,6 +153,7 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
           keywords,
           quietHours: getQuietHours(),
           businessConnections: listBusinessConnections(),
+          chatReplies: listChatReplies(),
         }),
       );
     } else if (type === "set-quiet-hours") {
@@ -225,6 +230,39 @@ export function createHub(opts?: { sendTelegram?: SendTelegramFn }) {
         return;
       }
       broadcast({ type: "replies-updated", replies: getReplies() });
+    } else if (type === "set-chat-replies") {
+      // Phone-panel per-chat reply editor: a chat's own 5 replies. An
+      // unknown chat is rejected first (forged or stale id); an invalid
+      // list is rejected and stores nothing — the panel shows the error.
+      const chatId = (msg as { chat_id?: unknown }).chat_id;
+      const replies = (msg as { replies?: unknown }).replies;
+      if (typeof chatId !== "number" || !Array.isArray(replies)) return;
+      if (!isKnownChat(chatId)) {
+        ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
+        return;
+      }
+      if (!setChatReplies(chatId, replies as string[])) {
+        ws.send(JSON.stringify({ type: "error", code: "bad-replies" }));
+        return;
+      }
+      broadcast({
+        type: "chat-replies-updated",
+        chat_id: chatId,
+        replies: replies as string[],
+      });
+    } else if (type === "clear-chat-replies") {
+      // Phone-panel reset: the chat falls back to the global replies.
+      const chatId = (msg as { chat_id?: unknown }).chat_id;
+      if (typeof chatId !== "number") return;
+      if (!clearChatReplies(chatId)) {
+        ws.send(JSON.stringify({ type: "error", code: "unknown-chat" }));
+        return;
+      }
+      broadcast({
+        type: "chat-replies-updated",
+        chat_id: chatId,
+        replies: null,
+      });
     } else if (type === "send-canned") {
       void handleSendCanned(
         ws,

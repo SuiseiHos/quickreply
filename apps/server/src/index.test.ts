@@ -12,6 +12,8 @@ import {
   setQuietHours,
   setVip,
   setBusinessConnection,
+  setChatReplies,
+  hasChatReplies,
   recordKnownChat,
   isAllowedChat,
   setChatAllowed,
@@ -174,6 +176,148 @@ test("WS open-message marks the message read and returns it", async () => {
       expect(msg.type).toBe("message");
       expect((msg.message as Record<string, unknown>).id).toBe("-123:7");
       expect(listInbox()[0].read).toBe(1);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS list-inbox carries per-chat reply sets", async () => {
+  recordKnownChat(-123, "Ops");
+  setChatReplies(-123, ["On it", "In a meeting", "Will check", "Yes", "No"]);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const msg = await reply;
+      expect(msg.type).toBe("inbox");
+      expect(msg.chatReplies).toEqual([
+        {
+          chat_id: -123,
+          replies: ["On it", "In a meeting", "Will check", "Yes", "No"],
+        },
+      ]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-replies saves a set and broadcasts chat-replies-updated", async () => {
+  recordKnownChat(-123, "Ops");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "set-chat-replies",
+          chat_id: -123,
+          replies: ["On it", "In a meeting", "Will check", "Yes", "No"],
+        }),
+      );
+      const msg = await pushed;
+      expect(msg.type).toBe("chat-replies-updated");
+      expect(msg.chat_id).toBe(-123);
+      expect(msg.replies).toEqual([
+        "On it",
+        "In a meeting",
+        "Will check",
+        "Yes",
+        "No",
+      ]);
+      // A second list-inbox shows the stored set.
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const inbox = await reply;
+      expect(inbox.chatReplies).toEqual([
+        {
+          chat_id: -123,
+          replies: ["On it", "In a meeting", "Will check", "Yes", "No"],
+        },
+      ]);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-replies rejects an invalid list with bad-replies", async () => {
+  recordKnownChat(-123, "Ops");
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "set-chat-replies",
+          chat_id: -123,
+          replies: ["a", "b", "c", "d"],
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("bad-replies");
+      expect(hasChatReplies(-123)).toBe(false);
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS set-chat-replies for an unknown chat returns unknown-chat", async () => {
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const reply = nextMessage(ws);
+      ws.send(
+        JSON.stringify({
+          type: "set-chat-replies",
+          chat_id: -999,
+          replies: ["a", "b", "c", "d", "e"],
+        }),
+      );
+      const msg = await reply;
+      expect(msg.type).toBe("error");
+      expect(msg.code).toBe("unknown-chat");
+    } finally {
+      ws.close();
+    }
+  } finally {
+    await shutdown(server);
+  }
+});
+
+test("WS clear-chat-replies deletes the set and broadcasts null", async () => {
+  recordKnownChat(-123, "Ops");
+  setChatReplies(-123, ["On it", "In a meeting", "Will check", "Yes", "No"]);
+  const { server, port } = await boot();
+  try {
+    const ws = await connect(port);
+    try {
+      const pushed = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "clear-chat-replies", chat_id: -123 }));
+      const msg = await pushed;
+      expect(msg.type).toBe("chat-replies-updated");
+      expect(msg.chat_id).toBe(-123);
+      expect(msg.replies).toBe(null);
+      const reply = nextMessage(ws);
+      ws.send(JSON.stringify({ type: "list-inbox" }));
+      const inbox = await reply;
+      expect(inbox.chatReplies).toEqual([]);
     } finally {
       ws.close();
     }
