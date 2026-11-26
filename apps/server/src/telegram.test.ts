@@ -50,7 +50,7 @@ const BUSINESS_CONNECTION_UPDATE = {
   update_id: 2001,
   business_connection: {
     id: "conn-1",
-    user: { id: 777, first_name: "Alvin", is_bot: false },
+    user: { id: 777, first_name: "Alex", is_bot: false },
     user_chat_id: 777,
     date: 1795524000,
     can_reply: true,
